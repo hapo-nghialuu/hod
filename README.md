@@ -194,12 +194,12 @@ naming Herdr and the skill.
 | `hod update` | Fast-forward the skill; a pinned checkout moves to the newest tag. Refuses a dirty tree |
 | `hod settings list` | Show the role permission profiles and ready-to-paste start commands |
 | `hod settings install [--role <r>] [--force]` | Write role profiles into a project's `.claude/` |
+| `hod prompt-safe <target> <text> [--force] [--timeout <ms>]` | Resolve a live agent and send a duplicate-guarded prompt |
+| `hod harvest <target> [--lines N]` | Save recent output from a live agent |
 | `hod uninstall [--purge]` | Remove only adapters that resolve into `~/.hod/skill`, and strip the reminder block; never touches foreign files |
 
-Everything `hod` runs against Herdr is **read-only** (`herdr status`,
-`herdr integration status`). It never starts agents, never installs
-integrations, never mutates a session — that authority stays with you and the
-controller.
+`hod status` and `hod doctor` use Herdr read-only. `hod prompt-safe` sends a guarded
+prompt to a resolved live agent; `hod harvest` saves bounded recent output.
 
 ## The reminder block
 
@@ -353,7 +353,7 @@ herdr-orchestrator/
 ├── bin/hod                     # the CLI — install, doctor, settings, update
 ├── install.sh                  # curl | sh bootstrap (HOD_REF pins a version)
 ├── scripts/
-│   ├── test-hod.sh             # 55 hermetic CLI tests
+│   ├── test-hod.sh             # hermetic CLI tests
 │   └── validate.sh             # syntax + frontmatter + markdown links
 ├── templates/                  # policy template + role permission profiles
 ├── docs/                       # human guides

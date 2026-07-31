@@ -11,3 +11,4 @@ wait and harvest its evidence, or say exactly what is still running where.
 Outside a Herdr pane (`HERDR_ENV` unset), this preference is not a blocker:
 do the work normally, and for a substantial task mention once that this
 project prefers Herdr orchestration.
+- When a diff exceeds roughly 100 lines or a work item is complete, commit a checkpoint on the working branch; do not push.

@@ -15,6 +15,8 @@ Usage:
   hod uninstall [--project <path>] [--purge] [--no-memo]
   hod settings list
   hod settings install [--project <path>] [--role <name>] [--force]
+  hod prompt-safe <target> <text> [--force] [--timeout <ms>]
+  hod harvest <target> [--lines N]
   hod version
   hod help
 
@@ -29,6 +31,8 @@ Subcommands:
   uninstall   Remove hod-managed adapter symlinks; --purge also removes skill data
   settings    Copy per-role Claude Code settings profiles into a project
               (list shows the roles; install writes .claude/settings.<role>.json)
+  prompt-safe Resolve an existing live agent, then send a guarded prompt
+  harvest     Save bounded recent output from an existing live agent
   version     Print the hod version
   help        Show this help
 
@@ -60,6 +64,7 @@ Environment overrides (for tests and custom layouts):
   HOD_CLAUDE_DIR   default: ~/.claude
   HOD_AGENTS_DIR   default: ~/.agents
   HOD_REPO_URL     default: official GitHub clone URL
+  HOD_HERDR_BIN    default: herdr (override for a compatible test stub)
 EOF
 }
 
@@ -83,6 +88,7 @@ resolve_paths() {
   HOD_BIN_DIR=${HOD_BIN_DIR:-$home_dir/.local/bin}
   HOD_CLAUDE_DIR=${HOD_CLAUDE_DIR:-$home_dir/.claude}
   HOD_AGENTS_DIR=${HOD_AGENTS_DIR:-$home_dir/.agents}
+  HOD_HERDR_BIN=${HOD_HERDR_BIN:-herdr}
 
   SKILL_DIR=$HOD_HOME/skill
   # Adapter directory name must match SKILL.md's `name:` field so the skill
@@ -1166,6 +1172,358 @@ cmd_settings() {
   esac
 }
 
+require_prompt_tools() {
+  [[ -n "$HOD_HERDR_BIN" ]] || fail "HOD_HERDR_BIN must not be empty"
+  command -v jq >/dev/null 2>&1 || fail "jq is required for prompt-safe and harvest"
+}
+
+agent_state_from_json() {
+  local json=$1
+  printf '%s\n' "$json" | jq -er \
+    '(.agent_status // .status // .result.agent_status // .agent.agent_status // .agent.status // .result.agent.agent_status // .result.agent.status) | select(type == "string")'
+}
+
+resolve_agent() {
+  local target=$1 list_json agents_json matches_json agent_json match_count
+
+  require_prompt_tools
+  set +e
+  list_json=$("$HOD_HERDR_BIN" agent list 2>&1)
+  local list_rc=$?
+  set -e
+  (( list_rc == 0 )) || fail "herdr agent list failed (exit $list_rc): $list_json"
+  if ! agents_json=$(printf '%s\n' "$list_json" | jq -cer '(.agents // .result.agents) | select(type == "array")'); then
+    fail "herdr agent list returned invalid JSON or missing agents array"
+  fi
+
+  if ! matches_json=$(printf '%s\n' "$agents_json" | jq -cer \
+      --arg target "$target" \
+      '[.[] | select((.name? == $target) or (.pane_id? == $target))]'); then
+    fail "herdr agent list returned invalid agent data"
+  fi
+  match_count=$(printf '%s\n' "$matches_json" | jq -er 'length')
+  if (( match_count != 1 )); then
+    if (( match_count == 0 )); then
+      printf 'error: target not found among live agents: %s\n' "$target" >&2
+    else
+      printf 'error: target matched %s live agents; expected exactly one: %s\n' \
+        "$match_count" "$target" >&2
+    fi
+    printf 'matches:\n' >&2
+    printf '%s\n' "$matches_json" | jq -r \
+      '.[] | [(.name // "-"), (.pane_id // "-"), (.agent_status // .status // "unknown")] | "  name=" + .[0] + " pane_id=" + .[1] + " status=" + .[2]' >&2
+    printf 'live agents:\n' >&2
+    printf '%s\n' "$agents_json" | jq -r \
+      '.[] | [(.name // "-"), (.pane_id // "-"), (.agent_status // .status // "unknown")] | "  name=" + .[0] + " pane_id=" + .[1] + " status=" + .[2]' >&2
+    return 1
+  fi
+
+  agent_json=$(printf '%s\n' "$matches_json" | jq -cer '.[0]')
+  AGENT_STATUS=$(agent_state_from_json "$agent_json" 2>/dev/null || true)
+}
+
+sha256_text() {
+  local text=$1
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$text" | shasum -a 256 | cut -d ' ' -f 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$text" | sha256sum | cut -d ' ' -f 1
+  else
+    fail "shasum or sha256sum is required for prompt-safe"
+  fi
+}
+
+PROMPT_LOCK_DIR=''
+
+prompt_lock_contains_only_pid() {
+  local lock_dir=$1
+  local pid_file=$lock_dir/pid
+  local entry
+
+  for entry in "$lock_dir"/* "$lock_dir"/.[!.]* "$lock_dir"/..?*; do
+    [[ -e "$entry" || -L "$entry" ]] || continue
+    [[ "$entry" == "$pid_file" ]] || return 1
+  done
+  return 0
+}
+
+# Return 0 for live, 1 for confirmed absent, and 2 when liveness is unclear.
+prompt_pid_liveness() {
+  local pid=$1 ps_output ps_status
+
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  # macOS ps exits 1 for an absent PID; Linux commonly exits 0 with no rows.
+  # Preserve stderr so permission or other ps failures remain ambiguous.
+  if ps_output=$(ps -p "$pid" -o pid= 2>&1); then
+    ps_status=0
+  else
+    ps_status=$?
+  fi
+  if (( ps_status == 0 )) && [[ "$ps_output" =~ ^[[:space:]]*$pid[[:space:]]*$ ]]; then
+    return 0
+  fi
+  if [[ "$ps_output" =~ ^[[:space:]]*$ ]]; then
+    return 1
+  fi
+  return 2
+}
+
+prompt_lock_cleanup() {
+  local status=$?
+  local pid_file owner_pid
+
+  trap - EXIT
+  if [[ -n "$PROMPT_LOCK_DIR" ]]; then
+    pid_file=$PROMPT_LOCK_DIR/pid
+    owner_pid=''
+    if [[ -f "$pid_file" && ! -L "$pid_file" ]]; then
+      owner_pid=$(<"$pid_file") || owner_pid=''
+      if [[ "$owner_pid" == "$$" ]]; then
+        rm -f -- "$pid_file" || true
+      fi
+    fi
+    rmdir -- "$PROMPT_LOCK_DIR" 2>/dev/null || true
+    PROMPT_LOCK_DIR=''
+  fi
+  exit "$status"
+}
+
+recover_stale_prompt_lock() {
+  local lock_dir=$1
+  local pid_file=$lock_dir/pid
+  local pid liveness_status
+
+  [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 1
+  [[ -f "$pid_file" && ! -L "$pid_file" ]] || return 1
+  prompt_lock_contains_only_pid "$lock_dir" || return 1
+  if ! pid=$(<"$pid_file"); then
+    return 1
+  fi
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  if prompt_pid_liveness "$pid"; then
+    return 1
+  else
+    liveness_status=$?
+  fi
+  (( liveness_status == 1 )) || return 1
+  rm -f -- "$pid_file" || return 1
+  rmdir -- "$lock_dir" 2>/dev/null || return 1
+}
+
+acquire_prompt_lock() {
+  local state_dir=$1
+  local lock_dir=$state_dir/prompt-safe.lock
+
+  mkdir -p -- "$state_dir" || fail "cannot create prompt hash state directory: $state_dir"
+  if ! mkdir -- "$lock_dir" 2>/dev/null; then
+    if recover_stale_prompt_lock "$lock_dir"; then
+      mkdir -- "$lock_dir" 2>/dev/null || fail "prompt-safe lock is busy: $lock_dir"
+    else
+      fail "prompt-safe lock is busy: $lock_dir"
+    fi
+  fi
+  PROMPT_LOCK_DIR=$lock_dir
+  trap prompt_lock_cleanup EXIT
+  if ! (set -C; printf '%s\n' "$$" >"$lock_dir/pid"); then
+    fail "cannot write prompt-safe lock owner: $lock_dir/pid"
+  fi
+}
+
+prompt_hash_duplicate() {
+  local hash_file=$1 hash=$2 now=$3 line_hash line_timestamp
+
+  [[ -f "$hash_file" ]] || return 1
+  while read -r line_hash line_timestamp _; do
+    [[ "$line_hash" == "$hash" ]] || continue
+    [[ "$line_timestamp" =~ ^[0-9]+$ ]] || continue
+    if (( now >= line_timestamp && now - line_timestamp < 600 )); then
+      return 0
+    fi
+  done <"$hash_file"
+  return 1
+}
+
+record_prompt_hash() {
+  local hash_file=$1 hash=$2 timestamp=$3 state_dir tmp_file
+
+  state_dir=$(dirname -- "$hash_file")
+  mkdir -p -- "$state_dir"
+  [[ ! -e "$hash_file" || -f "$hash_file" ]] || \
+    fail "prompt hash state is not a regular file: $hash_file"
+  tmp_file=$(mktemp "$state_dir/.prompt-hashes.XXXXXX") || \
+    fail "cannot create prompt hash state"
+  if [[ -f "$hash_file" ]]; then
+    tail -n 19 "$hash_file" >"$tmp_file" || {
+      rm -f -- "$tmp_file"
+      fail "cannot read prompt hash state: $hash_file"
+    }
+  fi
+  printf '%s %s\n' "$hash" "$timestamp" >>"$tmp_file" || {
+    rm -f -- "$tmp_file"
+    fail "cannot write prompt hash state: $hash_file"
+  }
+  mv -f -- "$tmp_file" "$hash_file" || {
+    rm -f -- "$tmp_file"
+    fail "cannot replace prompt hash state: $hash_file"
+  }
+}
+
+cmd_prompt_safe() {
+  local target text force=false timeout=45000 hash now output rc prior_status
+  local state_dir hash_file
+
+  [[ $# -ge 2 ]] || usage_error "prompt-safe requires <target> <text>"
+  target=$1
+  text=$2
+  shift 2
+  [[ -n "$target" ]] || usage_error "prompt-safe target must not be empty"
+  [[ -n "$text" ]] || usage_error "prompt-safe text must not be empty"
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --force)
+        force=true
+        shift
+        ;;
+      --timeout)
+        [[ $# -ge 2 ]] || usage_error "--timeout requires milliseconds"
+        timeout=$2
+        shift 2
+        ;;
+      *)
+        usage_error "unknown prompt-safe option: $1"
+        ;;
+    esac
+  done
+  if [[ ! "$timeout" =~ ^[0-9]+$ || "$timeout" =~ ^0+$ ]]; then
+    usage_error "--timeout must be a positive integer"
+  fi
+
+  resolve_agent "$target"
+  prior_status=$AGENT_STATUS
+  if [[ "$AGENT_STATUS" == working && "$force" != true ]]; then
+    fail "target is working: $target (use --force to send anyway)"
+  fi
+
+  hash=$(sha256_text "${target}${text}")
+  state_dir=$HOD_HOME/state
+  hash_file=$state_dir/prompt-hashes
+  acquire_prompt_lock "$state_dir"
+  now=$(date +%s)
+  if [[ -L "$hash_file" ]]; then
+    fail "prompt hash state must not be a symlink: $hash_file"
+  fi
+  if [[ "$force" != true ]] && prompt_hash_duplicate "$hash_file" "$hash" "$now"; then
+    fail "duplicate prompt rejected within 10 minutes: $target"
+  fi
+
+  set +e
+  output=$("$HOD_HERDR_BIN" agent prompt "$target" "$text" --wait --timeout "$timeout" 2>&1)
+  rc=$?
+  set -e
+
+  if [[ "$output" == *agent_prompt_stalled* ]]; then
+    local send_output get_output get_rc send_rc recovered_state recovery_confirmed=false
+    set +e
+    send_output=$("$HOD_HERDR_BIN" agent send-keys "$target" enter 2>&1)
+    send_rc=$?
+    sleep 5
+    get_output=$("$HOD_HERDR_BIN" agent get "$target" 2>&1)
+    get_rc=$?
+    set -e
+
+    if (( get_rc == 0 )); then
+      recovered_state=$(agent_state_from_json "$get_output" || true)
+    else
+      recovered_state=""
+    fi
+    case "$recovered_state" in
+      working|blocked|done)
+        # send-keys output is not proof; only a changed, valid state confirms recovery.
+        if [[ -n "$prior_status" && "$recovered_state" != "$prior_status" ]]; then
+          recovery_confirmed=true
+        fi
+        ;;
+    esac
+    if [[ "$recovery_confirmed" == true ]]; then
+      record_prompt_hash "$hash_file" "$hash" "$(date +%s)"
+      [[ -n "$output" ]] && printf '%s\n' "$output"
+      [[ -n "$send_output" ]] && printf '%s\n' "$send_output" >&2
+      [[ -n "$get_output" ]] && printf '%s\n' "$get_output" >&2
+      return 0
+    fi
+
+    printf 'error: agent_prompt_stalled; prompt delivery not confirmed\n' >&2
+    printf 'prompt state before send: %s\n' "${prior_status:-unknown}" >&2
+    printf 'prompt evidence: %s\n' "$output" >&2
+    printf 'send-keys exit=%s: %s\n' "$send_rc" "$send_output" >&2
+    printf 'agent get exit=%s: %s\n' "$get_rc" "$get_output" >&2
+    return 1
+  fi
+
+  if (( rc != 0 )); then
+    fail "agent prompt failed (exit $rc): $output"
+  fi
+
+  record_prompt_hash "$hash_file" "$hash" "$(date +%s)"
+  [[ -n "$output" ]] && printf '%s\n' "$output"
+}
+
+cmd_harvest() {
+  local target lines=2000 target_file harvest_dir timestamp tmp_file error_file
+  local target_safe read_rc read_error
+
+  [[ $# -ge 1 ]] || usage_error "harvest requires <target>"
+  target=$1
+  shift
+  [[ -n "$target" ]] || usage_error "harvest target must not be empty"
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --lines)
+        [[ $# -ge 2 ]] || usage_error "--lines requires a count"
+        lines=$2
+        shift 2
+        ;;
+      *)
+        usage_error "unknown harvest option: $1"
+        ;;
+    esac
+  done
+  if [[ ! "$lines" =~ ^[0-9]+$ || "$lines" =~ ^0+$ ]]; then
+    usage_error "--lines must be a positive integer"
+  fi
+
+  resolve_agent "$target"
+  harvest_dir=$HOD_HOME/harvest
+  mkdir -p -- "$harvest_dir"
+  timestamp=$(date '+%Y%m%d-%H%M%S')
+  target_safe=$(printf '%s' "$target" | tr -c 'A-Za-z0-9._-' '_')
+  target_file=$harvest_dir/$timestamp-$target_safe.txt
+  tmp_file=$(mktemp "$harvest_dir/.harvest.XXXXXX") || fail "cannot create harvest temporary file"
+  error_file=$(mktemp "$harvest_dir/.harvest-error.XXXXXX") || {
+    rm -f -- "$tmp_file"
+    fail "cannot create harvest error file"
+  }
+
+  set +e
+  "$HOD_HERDR_BIN" agent read "$target" --source recent-unwrapped --lines "$lines" >"$tmp_file" 2>"$error_file"
+  read_rc=$?
+  set -e
+  if (( read_rc != 0 )); then
+    read_error=$(<"$error_file")
+    rm -f -- "$tmp_file" "$error_file"
+    fail "agent read failed (exit $read_rc): $read_error"
+  fi
+
+  rm -f -- "$error_file"
+  mv -f -- "$tmp_file" "$target_file"
+  printf '%s\n' "$target_file"
+}
+
 cmd_version() {
   printf 'hod %s\n' "$HOD_VERSION"
 }
@@ -1199,6 +1557,12 @@ main() {
       ;;
     settings)
       cmd_settings "$@"
+      ;;
+    prompt-safe)
+      cmd_prompt_safe "$@"
+      ;;
+    harvest)
+      cmd_harvest "$@"
       ;;
     version)
       cmd_version "$@"
