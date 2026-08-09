@@ -54,7 +54,7 @@ hod status
 <summary>Ghim một bản phát hành thay vì bám <code>main</code> — khuyến nghị cho team</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.12 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.13 sh
 ```
 
 </details>
@@ -182,6 +182,27 @@ không bên nào giả vờ làm việc của bên kia.
 **Dấu hiệu chạy đúng: sidebar Herdr mọc pane mới.** Nếu chỉ thấy dòng
 "background agents" mà sidebar đứng im — CLI đang dùng sub-agent nội bộ chứ
 không phải điều phối qua Herdr; hãy nhắc lại yêu cầu kèm tên Herdr và skill.
+
+## Adaptive coordinator (opt-in)
+
+Workflow mặc định không đổi trừ khi bạn nói rõ muốn adaptive coordinator hoặc
+coordinator kèm advisor. Adaptive mode chọn route nhỏ nhất phù hợp với request:
+
+| Base mode | Dùng cho | Điều xảy ra |
+| --- | --- | --- |
+| `DIRECT` | Câu hỏi, giải thích, đọc/kiểm tra read-only, và status | Fast path không plan; không worker hay checkpoint |
+| `SINGLE` | Một kết quả có thể đảo ngược, một owner hẹp | Một task packet và bằng chứng máy móc cho thay đổi repo |
+| `ORCHESTRATE` | Nhiều writer, dependency, phase, repo, hoặc blast radius lớn | Working plan, ownership tường minh, và điều phối theo thứ tự |
+
+`CONSULT` và `ASK_USER` là overlay, không phải mode bổ sung. Consult mở một
+advisor độc lập trong session mới khi có trigger kỹ thuật đáng kể; câu hỏi về
+authority, permission, chi phí, hay hành động hướng ra ngoài sẽ dừng để bạn
+quyết. Bạn chọn advisor trong `Fable`, `GPT-5.6 Sol`, hoặc `Opus` — advisor chỉ
+đánh giá, không phê duyệt. Mọi thay đổi repo vẫn có E0 evidence receipt máy móc
+trước acceptance, và mọi tripwire đều `HOLD` trước khi route lại.
+
+Xem [reference adaptive coordinator](references/coordinator-advisor.md) để đọc
+đủ protocol và [ví dụ sử dụng](docs/usage-guide.md).
 
 ## Lệnh `hod`
 
@@ -312,11 +333,12 @@ Bản contract mà controller vận hành theo, cô đọng lại:
   kiểm tra, tới khi bạn cho phép xóa.
 
 Mọi luật bất biến nằm ngay trong [`SKILL.md`](SKILL.md) — nạp trọn vẹn mỗi khi
-skill kích hoạt — cộng ba reference chỉ nạp khi cần:
+skill kích hoạt — cộng các reference chỉ nạp khi cần:
 
 | Reference | Nội dung |
 | --- | --- |
 | [Operations](references/operations.md) | Recipe lệnh, khôi phục prompt stalled, sentinel, task packet, hồi sinh session, checklist tích hợp |
+| [Adaptive coordinator](references/coordinator-advisor.md) | Routing opt-in, tripwire, evidence gate, policy advisor, và checkpoint handoff |
 | [Portfolio hierarchy](references/portfolio-hierarchy.md) | Một orchestrator, nhiều dự án: tier, policy, state bền vững |
 | [Legacy Herdr 0.7.1](references/legacy-herdr-0.7.1.md) | Đường tương thích cho bộ lệnh cũ |
 

@@ -27,6 +27,78 @@ agent wait <target> [--until STATUS]
 A group listing proves only that a subcommand exists; require the matching leaf
 help to prove its signature.
 
+## Adaptive mode: bounded recipes
+
+Use these short recipes only after the user opts into adaptive mode. The
+normative rules, gates, and exceptions are in
+[Adaptive Coordinator with Tripwire Escalation](coordinator-advisor.md); do not
+recreate that reference in an operations packet.
+
+### R0 before a dispatch or overlay
+
+For a worker dispatch, `CONSULT`, `ASK_USER`, or an existing checkpoint, record
+the smallest useful envelope before acting:
+
+```text
+ROUTE_VERSION: 1
+BASE_MODE: SINGLE | ORCHESTRATE
+FACTS: <at most three>
+HARD_TRIGGERS: none | <IDs>
+UNCERTAINTY: none | <route-changing unknown>
+NEXT: dispatch | read-only-scout | consult | ask-user
+```
+
+Do not print or persist this envelope for a clear `DIRECT` answer.
+
+### E0 receipt capture
+
+For every repository-changing task, capture fresh values from Git and the
+actual check process. A bounded shell inspection can establish the revision
+and changed paths; run verbose checks in a pane with a fresh sentinel:
+
+```bash
+base_sha=$(git rev-parse HEAD)
+head_sha=$(git rev-parse HEAD)
+changed_paths=$(git diff --name-only "$base_sha" --)
+diff_sha=$(git diff --binary "$base_sha" -- | shasum -a 256 | awk '{print $1}')
+sentinel="VERIFY_$(date +%s)_$RANDOM"
+herdr pane run "$check_pane" "<check>; rc=\$?; printf '%s exit=%s\\n' '$sentinel' \"\$rc\""
+herdr pane wait-output "$check_pane" --match "$sentinel" --timeout 600000
+herdr pane read "$check_pane" --source recent-unwrapped --lines 120
+git status --short
+```
+
+Fill the E0 fields from those outputs, not from a worker's prose. An absent
+sentinel, unknown exit, changed revision, ownership conflict, or stale artifact
+is `HOLD` and requires a new capture.
+
+### External checkpoint and handoff
+
+Create the checkpoint outside the checkout only when the reference requires
+one:
+
+```bash
+checkpoint_dir=$(mktemp -d "${TMPDIR:-/tmp}/hod-adaptive.XXXXXX")
+checkpoint_path="$checkpoint_dir/checkpoint.md"
+```
+
+Record the absolute path in the handoff. Only the active coordinator writes
+bounded metadata there; workers and advisors do not. On resume, reconcile
+Herdr state, Git state, actual artifacts, and a fresh E0 receipt before any
+dispatch. If the external path is not writable, do not broaden the sandbox or
+fall back into the checkout: use a fresh independent R0, otherwise `HOLD +
+ASK_USER`. Retain the directory until the user authorizes cleanup.
+
+### Permission prompts
+
+Start Claude with the existing role profile and inspect any residual dialog in
+the pane. A pre-allow or one-time approval is valid only for the exact action
+covered by an exact user authority reference. Missing or ambiguous authority,
+generic shell access, wildcard expansion, or a broader relaunch is `HOLD +
+ASK_USER`. Never use a dangerous permission bypass or an approval loop. For
+Codex, use only sandbox and approval flags confirmed by installed help; a
+sandbox failure is evidence to inspect, not permission to widen capability.
+
 ## Start a worker
 
 ```bash

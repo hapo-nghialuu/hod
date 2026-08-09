@@ -54,6 +54,24 @@ Use explicit pane IDs or unique live agent names, parsed from JSON with `jq -e` 
 7. Verify the integrated state: real diffs, fresh sentinel-guarded checks, and an independent read-only reviewer for material code changes. Resolve correctness and security findings before claiming completion.
 8. Report one cohesive, evidence-backed result ending with a distinct section for anything that still needs a user decision — or state plainly that nothing does.
 
+## Opt-in adaptive coordinator
+
+Activate adaptive routing only when the user explicitly asks for an adaptive
+coordinator or for coordinator plus advisor behavior. Without that opt-in, the
+workflow above and the existing small-task/direct-user behavior are unchanged.
+
+When active, read [Adaptive Coordinator with Tripwire Escalation](references/coordinator-advisor.md)
+as the normative reference. It defines three base modes — `DIRECT`, `SINGLE`,
+and `ORCHESTRATE` — plus `CONSULT` and `ASK_USER` overlays. `DIRECT` stays a
+fast path without a formal plan; `SINGLE` and `ORCHESTRATE` add only the
+artifacts their route requires.
+
+The adaptive protocol requires an E0 mechanical evidence receipt for every
+repository change, uses `HOLD` before tripwire re-routing, and calls a fresh
+advisor only on the reference's gates and triggers. Advisor selection remains
+user-owned, and the advisor never grants authority. Do not infer adaptive
+mode, a checkpoint, or an advisor consult from model confidence alone.
+
 ## Writing worker prompts
 
 Lead with an imperative outcome (`Implement <concrete outcome>.`). State constraints as user instructions, not policies from an unseen controller. End by asking for the outcome, changed files, commands run, test results, and unresolved questions. Keep the packet self-contained — work context path, exact writable paths (or "read-only"), files to read, dependency interfaces, acceptance criteria — without replaying conversation history. On follow-up, send only what changed, restate ownership when it grows, and name changed artifacts explicitly: a worker does not notice filesystem changes made behind its last read.
