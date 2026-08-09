@@ -81,7 +81,7 @@ state does not appear in the sidebar.
 curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | sh
 
 # Or pin a release — recommended for teams, reproducible:
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.12 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.13 sh
 ```
 
 This clones the skill into `~/.hod/skill/`, puts the `hod` executable on

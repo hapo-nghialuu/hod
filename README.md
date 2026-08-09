@@ -54,7 +54,7 @@ hod status
 <summary>Pin a release instead of tracking <code>main</code> — recommended for teams</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.12 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.13 sh
 ```
 
 </details>
@@ -181,6 +181,29 @@ judgment work* — and neither pretends to do the other's job.
 only see "background agents" messages and the sidebar stays still, the CLI is
 using its internal sub-agents, not Herdr orchestration — restate the request
 naming Herdr and the skill.
+
+## Adaptive coordinator (opt-in)
+
+The default workflow remains unchanged unless you explicitly ask for an
+adaptive coordinator or coordinator plus advisor. Adaptive mode chooses the
+smallest route that fits the request:
+
+| Base mode | Use it for | What happens |
+| --- | --- | --- |
+| `DIRECT` | Questions, explanations, read-only inspection, and status | A no-plan fast path; no worker or checkpoint |
+| `SINGLE` | One reversible outcome with one narrow owner | One task packet and mechanical evidence for a repository change |
+| `ORCHESTRATE` | Multiple writers, dependencies, phases, repositories, or large blast radius | A working plan, explicit ownership, and ordered coordination |
+
+`CONSULT` and `ASK_USER` are overlays, not additional modes. A consult opens a
+fresh independent advisor only when a material technical trigger exists; an
+authority, permission, cost, or external-action question pauses for you.
+Choose the advisor from `Fable`, `GPT-5.6 Sol`, or `Opus` — the advisor gives an
+assessment, never approval. Every repository change still gets a mechanical
+E0 evidence receipt before acceptance, and every tripwire holds before
+re-routing.
+
+See the [adaptive coordinator reference](references/coordinator-advisor.md) for
+the complete protocol and [usage examples](docs/usage-guide.md).
 
 ## The `hod` command
 
@@ -316,11 +339,12 @@ The contract the controller operates under, distilled:
   available for your inspection until you authorize removal.
 
 Every invariant lives in [`SKILL.md`](SKILL.md) itself — loaded whole whenever
-the skill activates — plus three references loaded only when needed:
+the skill activates — plus references loaded only when needed:
 
 | Reference | Covers |
 | --- | --- |
 | [Operations](references/operations.md) | Command recipes, stalled-prompt recovery, sentinels, task packets, session revival, integration checklists |
+| [Adaptive coordinator](references/coordinator-advisor.md) | Opt-in routing, tripwires, evidence gates, advisor policy, and handoff checkpoints |
 | [Portfolio hierarchy](references/portfolio-hierarchy.md) | One orchestrator, many projects: tiers, policies, persistent state |
 | [Legacy Herdr 0.7.1](references/legacy-herdr-0.7.1.md) | Compatibility path for the old command family |
 

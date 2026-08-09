@@ -29,6 +29,77 @@ Verification:
 You do not need to specify every worker. Explicit routing is useful only when a
 particular CLI, model, or independent perspective is a real requirement.
 
+## Adaptive coordinator (opt-in)
+
+Ask for adaptive behavior explicitly. Without that opt-in, the normal workflow
+and its existing small-task path stay in effect. Adaptive mode selects one
+base mode and may add an overlay:
+
+### `DIRECT`
+
+Use it for a question, explanation, read-only inspection, or status check:
+
+```text
+Use adaptive coordinator mode to explain this retry path from the current
+source. Read-only only; return the evidence and unresolved questions.
+```
+
+There is no formal plan, worker, or external checkpoint for this fast path.
+
+### `SINGLE`
+
+Use it for one reversible outcome with one narrow owner:
+
+```text
+Use adaptive coordinator mode to add the parser regression test in
+tests/parser.test.js. One writer owns that file, do not commit or push, and
+return the fresh E0 receipt plus test results.
+```
+
+The coordinator sends one task packet. A repository change always receives E0;
+an advisor is added only when a material trigger or explicit review request
+requires it.
+
+### `ORCHESTRATE`
+
+Use it when ownership, dependencies, or phases require a working plan:
+
+```text
+Use adaptive coordinator mode to implement the API and UI changes. Give each
+worker disjoint ownership, document dependencies, use a working plan, and
+stop before integration if ownership or evidence conflicts.
+```
+
+The coordinator registers ownership before dispatch and uses `HOLD` before any
+tripwire re-route.
+
+### Overlays: `CONSULT` and `ASK_USER`
+
+Request a technical assessment without giving the advisor authority:
+
+```text
+Use adaptive coordinator mode and consult a fresh advisor on this public API
+compatibility choice. I choose Fable, GPT-5.6 Sol, or Opus; do not substitute
+if my selection is unavailable.
+```
+
+Use `ASK_USER` for a permission, cost, credential, publication, external, or
+irreversible decision:
+
+```text
+Hold before publishing the package. Show the exact target, scope, cost, and
+rollback, then ask me; do not treat an advisor assessment as approval.
+```
+
+### One-fixture validation
+
+For live protocol validation, use one disposable fixture root outside the
+candidate checkout for every applicable scenario. Keep an immutable baseline,
+use working copies with distinct ownership, and attach a fresh E0 receipt to
+each revision. Do not create a fixture-local commit or use a production
+repository. The fixture demonstrates routing and containment behavior; it is
+not evidence for general pricing or model-comparison conclusions.
+
 ## Pattern 1: Small implementation
 
 Keep one writer and one optional reviewer:

@@ -10,6 +10,39 @@ A role is defined by the promise the controller may trust, not by the mechanism.
 | `controller` | Does not do task work or spawn agents. *(documented only — no full worker-run verification yet; socket evidence only)* | [`settings.controller.json`](../templates/settings-controller.json) | `-s workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true -c features.multi_agent=false` |
 | `impl` | May edit code and commit; must not publish (`push`/`merge`). Neither CLI removes the spawn-agent tool at this role — see [Honest gaps](#honest-gaps). | [`settings.impl.json`](../templates/settings-impl.json) | `-s workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true -c 'sandbox_workspace_write.writable_roots=["<abs-repo>/.git"]'` |
 
+## Advisor mapping
+
+An adaptive advisor is a fresh reviewer session, not a fourth permission role.
+The user chooses one advisor model from `Fable`, `GPT-5.6 Sol`, or `Opus`; the
+model choice does not change the CLI boundary:
+
+| Adaptive gate | Boundary | Claude | Codex |
+| --- | --- | --- | --- |
+| `G1 PLAN`, `G2 EVIDENCE`, `G3 BLOCKER`, `G4 RISK` | Fresh, read-only reviewer | `settings.reviewer.json` | `-s read-only -c features.multi_agent=false` |
+
+The advisor reads a self-contained packet and returns an assessment. It does
+not edit, dispatch, choose a replacement model, or grant authority. A G2
+advisor is independent of the writer and any G1 advisor; it may also serve as
+the final independent reviewer, so a second reviewer is not assumed. Do not
+create a new advisor settings template: reuse the existing reviewer profile or
+flags and retain the CLI-specific gaps below.
+
+## Control-plane checkpoint exception
+
+When adaptive mode requires an external Markdown checkpoint, only the active
+coordinator may write that control-plane metadata. This is a documented role
+exception and does not grant permission to edit task files, worker artifacts,
+or repository content. Workers and advisors never write the checkpoint.
+
+The checkpoint lives in a unique temporary directory outside the checkout and
+contains bounded metadata, paths, hashes, and receipts. It is reconciled with
+Herdr state, Git state, actual artifacts, and fresh E0 evidence on resume; it
+is not canonical truth. The protocol makes no claim of locking, lease
+enforcement, atomicity, crash recovery, or durable cross-reboot storage. If
+the active coordinator cannot write the safe external path, do not broaden a
+sandbox or use the checkout as a fallback: run an independent R0 and otherwise
+stop with `HOLD + ASK_USER`.
+
 Codex worker examples, passed after Herdr's `--` separator:
 
 ```bash
@@ -39,7 +72,7 @@ The `<abs-repo>` replacement matters because Codex protects `.git` by default in
 - Neither impl profile removes the spawn-agent tool. The Claude profile denies the named publish commands but not every route to them, and does not deny `Agent`; the Codex flag set omits `features.multi_agent=false` — which would not hold in an interactive worker anyway. So at this role the no-spawn expectation rests on prompt wording, symmetric across both CLIs. The controller must check the commit, the absence of publication, and the absence of child-agent work.
 - Codex impl deliberately opens network and `.git` so it can work and commit. It does not hard-block `push`, `merge`, `reset`, or `tag`; that boundary is wording-level and evidence-checked, unlike Claude's deny rules for the named commands.
 - A Codex controller cannot be sandbox-locked and still drive Herdr. Verified on `0.146.0`: `herdr status` fails with `Operation not permitted` under `read-only` and under default `workspace-write`; it works only with `sandbox_workspace_write.network_access=true`, because the seatbelt network rule also covers Herdr's Unix socket. So the controller's no-edit promise on Codex is wording-level plus evidence — exactly the same weakness as Claude's controller profile, which leaves `Bash` open. The two CLIs are symmetric at precisely this point.
-- Codex reviewer `features.multi_agent=false` does not hide `spawn_agent` in interactive workers (`0.146.1`): the flag removes the tool in `codex exec` (verified `0.146.0`) but an interactive worker started with `-s read-only -c features.multi_agent=false` still reports it (seen as `multi_agent_v1__spawn_agent` and `collaboration.spawn_agent` — names vary by build, do not match on name). Low severity: any child inherits the same `read-only` sandbox and cannot write — verified by a blocked write leaving `git status` clean. What is lost is observability: delegation would not appear in the Herdr sidebar, so the controller must verify by evidence, not pane presence.
+- Codex reviewer `features.multi_agent=false` does not hide `spawn_agent` in interactive workers (`0.146.1`): the flag removes the tool in `codex exec` (verified `0.146.0`) but an interactive worker started with `-s read-only -c features.multi_agent=false` still reports it (seen as `multi_agent_v1__spawn_agent` and `collaboration.spawn_agent` — names vary by build, do not match on name). Low severity: any child inherits the same `read-only` sandbox and cannot write — verified by a blocked write leaving `git status` clean. What is lost is observability: delegation would not appear in the Herdr sidebar, so the controller must verify by evidence, not pane presence. **Update for `0.147.0`**: live validation on `codex-cli 0.147.0` confirmed the flag removes `spawn_agent` from interactive context — this gap may be version-specific. Always probe the exact installed version before relying on the flag.
 - Project-level `.codex/config.toml` applies to `codex exec` but is ignored by interactive Herdr workers. Verified: `sandbox_mode = "read-only"` in the project config blocks writes in `codex exec` (`patch rejected: writing is blocked by read-only sandbox`), while an interactive worker in the same directory without CLI flags shows an approval dialog instead of blocking and still exposes `spawn_agent` despite `multi_agent = false` in the file. The `-s`/`-c` flags after Herdr's `--` remain the only effective path; do not assume committing a config file to the repo creates a boundary.
 
 ## Verified Codex behavior
