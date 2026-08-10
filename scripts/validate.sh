@@ -164,6 +164,9 @@ for field, expected in r0_enums.items():
     if operations_r0_values[field] != expected:
         raise SystemExit(f"Operations R0 v2: {field} must be exactly {expected}")
 
+usage = (root / "docs/usage-guide.md").read_text(encoding="utf-8")
+adaptive_usage = markdown_section(usage, "## Adaptive coordinator (opt-in)")
+
 base_modes = flattened(
     markdown_section(adaptive_reference, "## Base execution modes")
 )

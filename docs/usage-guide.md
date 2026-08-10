@@ -80,7 +80,12 @@ ownership or evidence conflicts.
 The coordinator registers ownership before dispatch and uses `HOLD` before any
 tripwire re-route. A dependent task records the upstream input fingerprint and
 stays stopped until its `READY_WHEN` condition holds; an upstream change makes
-the dependent packet stale and forces re-routing before another dispatch.
+the dependent packet stale and forces re-routing before another dispatch. On
+stale input: `HOLD` affected dependents, bump `PACKET_REVISION`, invalidate
+stale `INPUT_FINGERPRINT`, `EVIDENCE_REF`, and gate verdicts, compute new
+fingerprint, rerun R0, rerun applicable gates (G1 for plan/ownership/dependency/
+criteria changes; E0 and G2 for repository output or review evidence changes),
+and resume only after `READY_WHEN` is true on the new packet revision.
 
 ### Overlays: `CONSULT` and `ASK_USER`
 

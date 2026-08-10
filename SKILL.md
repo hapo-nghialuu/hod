@@ -71,6 +71,16 @@ most one route-changing read-only probe, and reruns R0 before action. An
 upstream fingerprint change holds affected dependents and invalidates their
 stale packet, gate, and evidence state under the normative reference.
 
+For `ORCHESTRATE` dependency nodes, the coordinator must use the exact
+R0 v2 envelope and require these fields in each node:
+`OWNER`, `READY_WHEN`, `INPUT_FINGERPRINT`, `INVALIDATE_IF`. On any upstream
+fingerprint change: `HOLD` every affected dependent, bump `PACKET_REVISION`,
+invalidate stale `INPUT_FINGERPRINT`, `EVIDENCE_REF`, and any gate verdict
+derived from them, compute the new fingerprint, rerun R0 for the affected
+route, rerun applicable gates (G1 when plan/ownership/dependency/criteria
+changed, E0 and G2 when repository output or review evidence changed), and
+resume only after `READY_WHEN` is true on the new packet revision.
+
 The adaptive protocol requires an E0 mechanical evidence receipt for every
 repository change, uses `HOLD` before tripwire re-routing, and calls a fresh
 advisor only on the reference's gates and triggers. Advisor selection remains
