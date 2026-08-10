@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-HOD_VERSION=0.1.13
+HOD_VERSION=0.1.14
 HOD_REPO_URL="${HOD_REPO_URL:-https://github.com/hapo-nghialuu/hod.git}"
 
 usage() {

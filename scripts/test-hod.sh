@@ -110,6 +110,111 @@ expect_output_success() {
   fi
 }
 
+# Test-only E0 snapshot primitive. It deliberately stays out of bin/hod: the
+# adaptive protocol is documentation, not a new public evidence CLI.
+capture_e0_pass() {
+  local repo_root=$1
+  local base_revision=$2
+  local pass_dir=$3
+  local head_before
+  local head_after
+  local relative_path
+
+  head_before=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}') ||
+    return 1
+  git -C "$repo_root" rev-parse --verify "${base_revision}^{commit}" \
+    >/dev/null 2>&1 || return 1
+  git -C "$repo_root" merge-base --is-ancestor \
+    "$base_revision" "$head_before" || return 1
+
+  {
+    printf 'HOD-E0-SNAPSHOT-V1\0'
+    printf 'DOMAIN committed\0'
+    git -C "$repo_root" --no-pager diff --binary --no-color \
+      --no-ext-diff --no-textconv --no-renames \
+      "$base_revision" "$head_before" -- || return 1
+    printf '\0DOMAIN staged\0'
+    git -C "$repo_root" --no-pager diff --cached --binary --no-color \
+      --no-ext-diff --no-textconv --no-renames "$head_before" -- || return 1
+    printf '\0DOMAIN unstaged\0'
+    git -C "$repo_root" --no-pager diff --binary --no-color \
+      --no-ext-diff --no-textconv --no-renames -- || return 1
+    printf '\0DOMAIN non-ignored-untracked\0'
+    git -C "$repo_root" ls-files --others --exclude-standard -z |
+      while IFS= read -r -d '' relative_path; do
+        printf 'PATH\0%s\0BLOB\0' "$relative_path"
+        git -C "$repo_root" hash-object --no-filters -- "$relative_path" ||
+          exit 1
+      done || return 1
+  } >"$pass_dir/payload" || return 1
+
+  if ! {
+    git -C "$repo_root" diff --name-only -z --no-renames \
+      "$base_revision" "$head_before" -- || exit 1
+    git -C "$repo_root" diff --cached --name-only -z --no-renames \
+      "$head_before" -- || exit 1
+    git -C "$repo_root" diff --name-only -z --no-renames -- || exit 1
+    git -C "$repo_root" ls-files --others --exclude-standard -z || exit 1
+  } | LC_ALL=C sort -zu >"$pass_dir/paths"; then
+    return 1
+  fi
+
+  git -C "$repo_root" status --porcelain=v1 -z --untracked-files=all \
+    >"$pass_dir/status" || return 1
+  head_after=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}') ||
+    return 1
+  [[ "$head_before" == "$head_after" ]] || return 1
+  printf '%s\n' "$head_before" >"$pass_dir/head"
+  python3 -c \
+    'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' \
+    "$pass_dir/payload" >"$pass_dir/hash" || return 1
+}
+
+capture_e0_snapshot() {
+  local fixture_path=$1
+  local base_revision=$2
+  local payload=$3
+  local changed_paths=$4
+  local between_pass_hook=${5:-}
+  local repo_root
+  local capture_dir
+
+  repo_root=$(git -C "$fixture_path" rev-parse --show-toplevel 2>/dev/null) ||
+    return 1
+  repo_root=$(cd -- "$repo_root" && pwd -P) || return 1
+  capture_dir=$(mktemp -d "$tmp_root/e0-capture.XXXXXX") || return 1
+  mkdir -p -- "$capture_dir/first" "$capture_dir/second"
+  rm -f -- "$payload" "$changed_paths"
+
+  if ! capture_e0_pass "$repo_root" "$base_revision" "$capture_dir/first"; then
+    rm -rf -- "$capture_dir"
+    return 1
+  fi
+  if [[ -n "$between_pass_hook" ]] &&
+    ! "$between_pass_hook" "$repo_root"; then
+    rm -rf -- "$capture_dir"
+    return 1
+  fi
+  if ! capture_e0_pass "$repo_root" "$base_revision" "$capture_dir/second"; then
+    rm -rf -- "$capture_dir"
+    return 1
+  fi
+
+  if ! cmp -s "$capture_dir/first/head" "$capture_dir/second/head" ||
+    ! cmp -s "$capture_dir/first/payload" "$capture_dir/second/payload" ||
+    ! cmp -s "$capture_dir/first/paths" "$capture_dir/second/paths" ||
+    ! cmp -s "$capture_dir/first/status" "$capture_dir/second/status" ||
+    ! cmp -s "$capture_dir/first/hash" "$capture_dir/second/hash"; then
+    rm -rf -- "$capture_dir"
+    return 1
+  fi
+
+  cp -- "$capture_dir/second/payload" "$payload"
+  cp -- "$capture_dir/second/paths" "$changed_paths"
+  cat -- "$capture_dir/second/hash"
+  rm -rf -- "$capture_dir"
+}
+
 skill_dir=$hod_home/skill
 global_agents=$agents_dir/skills/herdr-orchestrator
 global_claude=$claude_dir/skills/herdr-orchestrator
@@ -569,10 +674,194 @@ expect_rejection '--no-memo conflicts with --memo-strict' \
   "$hod" install --project "$mvar" --no-memo --memo-strict
 
 # ---------------------------------------------------------------------------
+# E0-style snapshot: all four Git change domains, paths, content, and staleness
+# ---------------------------------------------------------------------------
+# Reproduce the 0.1.13 defect first: both revisions were captured only after a
+# worker commit, so the committed delta vanished and non-ignored untracked
+# files were outside the tracked-only path set.
+e0_legacy_repo=$tmp_root/projects/e0-legacy-regression
+mkdir -p -- "$e0_legacy_repo"
+git -C "$e0_legacy_repo" init -q
+git -C "$e0_legacy_repo" config user.email "hod-test@example.com"
+git -C "$e0_legacy_repo" config user.name "hod-test"
+git -C "$e0_legacy_repo" config commit.gpgSign false
+printf 'baseline\n' >"$e0_legacy_repo/tracked.txt"
+git -C "$e0_legacy_repo" add tracked.txt
+git -C "$e0_legacy_repo" commit -q -m baseline
+printf 'worker commit\n' >>"$e0_legacy_repo/tracked.txt"
+git -C "$e0_legacy_repo" add tracked.txt
+git -C "$e0_legacy_repo" commit -q -m worker-change
+printf 'worker untracked\n' >"$e0_legacy_repo/untracked.txt"
+e0_legacy_base=$(git -C "$e0_legacy_repo" rev-parse HEAD)
+e0_legacy_head=$(git -C "$e0_legacy_repo" rev-parse HEAD)
+e0_legacy_paths=$(git -C "$e0_legacy_repo" diff --name-only \
+  "$e0_legacy_base" "$e0_legacy_head" --)
+
+e0_legacy_defect_is_reproduced() {
+  [[ "$e0_legacy_base" == "$e0_legacy_head" ]] &&
+    [[ -z "$e0_legacy_paths" ]] &&
+    [[ $(git -C "$e0_legacy_repo" rev-list --count HEAD) -eq 2 ]] &&
+    [[ -f "$e0_legacy_repo/untracked.txt" ]]
+}
+expect_success 'E0 0.1.13 tracked-only recipe misses committed and untracked work' \
+  e0_legacy_defect_is_reproduced
+
+e0_repo=$tmp_root/projects/e0-snapshot
+mkdir -p -- "$e0_repo"
+git -C "$e0_repo" init -q
+git -C "$e0_repo" config user.email "hod-test@example.com"
+git -C "$e0_repo" config user.name "hod-test"
+git -C "$e0_repo" config commit.gpgSign false
+printf 'baseline committed\n' >"$e0_repo/committed.txt"
+printf 'baseline unstaged\n' >"$e0_repo/unstaged.txt"
+printf 'ignored/\n' >"$e0_repo/.gitignore"
+git -C "$e0_repo" add -A
+git -C "$e0_repo" commit -q -m baseline
+e0_base=$(git -C "$e0_repo" rev-parse HEAD)
+
+printf 'committed-domain-content\n' >>"$e0_repo/committed.txt"
+git -C "$e0_repo" add committed.txt
+git -C "$e0_repo" commit -q -m committed-change
+printf 'staged-domain-content\n' >"$e0_repo/staged.txt"
+git -C "$e0_repo" add staged.txt
+printf 'unstaged-domain-content\n' >>"$e0_repo/unstaged.txt"
+printf 'untracked-domain-content\n' >"$e0_repo/untracked.txt"
+mkdir -p -- "$e0_repo/nested"
+printf 'nested-untracked-content\n' >"$e0_repo/nested/nested-untracked.txt"
+printf 'newline-path-content\n' >"$e0_repo/line
+break.txt"
+printf 'unicode-path-content\n' >"$e0_repo/tệp.txt"
+mkdir -p -- "$e0_repo/ignored"
+printf 'ignored-content\n' >"$e0_repo/ignored/not-captured.txt"
+
+e0_payload_1=$tmp_root/e0-payload-1
+e0_paths_1=$tmp_root/e0-paths-1
+e0_payload_2=$tmp_root/e0-payload-2
+e0_paths_2=$tmp_root/e0-paths-2
+e0_payload_nested=$tmp_root/e0-payload-nested
+e0_paths_nested=$tmp_root/e0-paths-nested
+e0_expected_paths_unsorted=$tmp_root/e0-expected-paths-unsorted
+e0_expected_paths=$tmp_root/e0-expected-paths
+e0_hash_1=$(capture_e0_snapshot "$e0_repo" "$e0_base" "$e0_payload_1" "$e0_paths_1")
+e0_hash_2=$(capture_e0_snapshot "$e0_repo" "$e0_base" "$e0_payload_2" "$e0_paths_2")
+e0_hash_nested=$(capture_e0_snapshot "$e0_repo/nested" "$e0_base" \
+  "$e0_payload_nested" "$e0_paths_nested")
+printf '%s\0' committed.txt staged.txt unstaged.txt untracked.txt \
+  nested/nested-untracked.txt $'line\nbreak.txt' 'tệp.txt' \
+  >"$e0_expected_paths_unsorted"
+LC_ALL=C sort -zu "$e0_expected_paths_unsorted" >"$e0_expected_paths"
+
+expect_success 'E0 snapshot captures committed, staged, unstaged, and untracked paths' \
+  cmp -s "$e0_expected_paths" "$e0_paths_1"
+
+for content in committed-domain-content staged-domain-content \
+  unstaged-domain-content; do
+  expect_success "E0 snapshot captures content: $content" \
+    grep -a -qF -- "$content" "$e0_payload_1"
+done
+
+e0_untracked_blob=$(git -C "$e0_repo" hash-object --no-filters -- untracked.txt)
+expect_success 'E0 snapshot hashes non-ignored untracked content' \
+  grep -a -qF -- "$e0_untracked_blob" "$e0_payload_1"
+expect_success 'E0 snapshot preserves a newline path' \
+  grep -a -qF -- $'line\nbreak.txt' "$e0_payload_1"
+e0_payload_has_non_ascii_path() {
+  python3 -c \
+    'import sys; fields=open(sys.argv[1], "rb").read().split(b"\0"); raise SystemExit(0 if any(f.endswith(b".txt") and any(byte >= 128 for byte in f) for f in fields) else 1)' \
+    "$e0_payload_1"
+}
+expect_success 'E0 snapshot preserves a non-ASCII path' \
+  e0_payload_has_non_ascii_path
+
+expect_rejection 'E0 snapshot excludes ignored untracked content' \
+  grep -a -qF -- ignored-content "$e0_payload_1"
+
+e0_hash_is_nonempty_sha256() {
+  [[ "$e0_hash_1" =~ ^[0-9a-f]{64}$ ]]
+}
+expect_success 'E0 snapshot produces a nonempty SHA-256' \
+  e0_hash_is_nonempty_sha256
+
+e0_snapshot_is_deterministic() {
+  [[ "$e0_hash_1" == "$e0_hash_2" ]] &&
+    cmp -s "$e0_payload_1" "$e0_payload_2" &&
+    cmp -s "$e0_paths_1" "$e0_paths_2"
+}
+expect_success 'E0 snapshot is deterministic for unchanged state' \
+  e0_snapshot_is_deterministic
+
+e0_nested_cwd_is_invariant() {
+  [[ "$e0_hash_1" == "$e0_hash_nested" ]] &&
+    cmp -s "$e0_payload_1" "$e0_payload_nested" &&
+    cmp -s "$e0_paths_1" "$e0_paths_nested" &&
+    python3 -c \
+      'import sys; paths=set(open(sys.argv[1], "rb").read().split(b"\0")); raise SystemExit(0 if {b"untracked.txt", b"nested/nested-untracked.txt"} <= paths else 1)' \
+      "$e0_paths_nested"
+}
+expect_success 'E0 snapshot is repository-root invariant from nested cwd' \
+  e0_nested_cwd_is_invariant
+
+expect_rejection 'E0 snapshot rejects an invalid BASE_SHA' \
+  capture_e0_snapshot "$e0_repo" deadbeef \
+  "$tmp_root/e0-invalid-base-payload" "$tmp_root/e0-invalid-base-paths"
+
+e0_non_repo=$tmp_root/projects/e0-not-a-repo
+mkdir -p -- "$e0_non_repo"
+expect_rejection 'E0 snapshot rejects a non-repository target' \
+  capture_e0_snapshot "$e0_non_repo" "$e0_base" \
+  "$tmp_root/e0-non-repo-payload" "$tmp_root/e0-non-repo-paths"
+
+e0_race_repo=$tmp_root/projects/e0-race
+mkdir -p -- "$e0_race_repo"
+git -C "$e0_race_repo" init -q
+git -C "$e0_race_repo" config user.email "hod-test@example.com"
+git -C "$e0_race_repo" config user.name "hod-test"
+git -C "$e0_race_repo" config commit.gpgSign false
+printf 'baseline\n' >"$e0_race_repo/race.txt"
+git -C "$e0_race_repo" add race.txt
+git -C "$e0_race_repo" commit -q -m baseline
+e0_race_base=$(git -C "$e0_race_repo" rev-parse HEAD)
+printf 'before-snapshot\n' >>"$e0_race_repo/race.txt"
+
+mutate_e0_between_passes() {
+  local repo_root=$1
+  printf 'between-snapshots\n' >>"$repo_root/race.txt"
+}
+
+expect_rejection 'E0 snapshot rejects mutation between consecutive passes' \
+  capture_e0_snapshot "$e0_race_repo" "$e0_race_base" \
+  "$tmp_root/e0-race-payload" "$tmp_root/e0-race-paths" \
+  mutate_e0_between_passes
+expect_rejection 'E0 unstable capture emits no payload' \
+  test -e "$tmp_root/e0-race-payload"
+expect_rejection 'E0 unstable capture emits no changed-path union' \
+  test -e "$tmp_root/e0-race-paths"
+
+# Change content on an already captured path. The path union remains identical,
+# so only a content-aware receipt can detect that the old hash is stale.
+printf 'later-change-invalidates-receipt\n' >>"$e0_repo/untracked.txt"
+e0_payload_3=$tmp_root/e0-payload-3
+e0_paths_3=$tmp_root/e0-paths-3
+e0_hash_3=$(capture_e0_snapshot "$e0_repo" "$e0_base" "$e0_payload_3" "$e0_paths_3")
+e0_untracked_blob_3=$(git -C "$e0_repo" hash-object --no-filters -- untracked.txt)
+
+expect_success 'E0 later content change preserves the changed-path union' \
+  cmp -s "$e0_paths_1" "$e0_paths_3"
+
+e0_snapshot_becomes_stale() {
+  [[ "$e0_hash_1" != "$e0_hash_3" ]] &&
+    [[ "$e0_untracked_blob" != "$e0_untracked_blob_3" ]] &&
+    grep -a -qF -- "$e0_untracked_blob_3" "$e0_payload_3"
+}
+expect_success 'E0 snapshot becomes stale after a later content change' \
+  e0_snapshot_becomes_stale
+
+# ---------------------------------------------------------------------------
 # help / version
 # ---------------------------------------------------------------------------
 expect_success 'help exits 0' "$hod" help
 expect_success 'version exits 0' "$hod" version
+expect_output_contains 'version reports 0.1.14' 'hod 0.1.14' "$hod" version
 expect_success 'no-args prints usage' "$hod"
 
 # ---------------------------------------------------------------------------

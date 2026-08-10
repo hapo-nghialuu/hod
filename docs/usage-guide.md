@@ -35,13 +35,19 @@ Ask for adaptive behavior explicitly. Without that opt-in, the normal workflow
 and its existing small-task path stay in effect. Adaptive mode selects one
 base mode and may add an overlay:
 
+Before a worker dispatch or overlay, the coordinator records a bounded R0 only
+when structured routing is needed. It classifies the unknown, chooses the risk
+level, and may use at most one read-only scout when that observation can change
+the route. Plain `DIRECT` remains ceremony-free.
+
 ### `DIRECT`
 
 Use it for a question, explanation, read-only inspection, or status check:
 
 ```text
-Use adaptive coordinator mode to explain this retry path from the current
-source. Read-only only; return the evidence and unresolved questions.
+Use Herdr and the herdr-orchestrator skill in adaptive coordinator mode to
+explain this retry path from the current source. Keep the work read-only;
+return the evidence and unresolved questions.
 ```
 
 There is no formal plan, worker, or external checkpoint for this fast path.
@@ -51,43 +57,56 @@ There is no formal plan, worker, or external checkpoint for this fast path.
 Use it for one reversible outcome with one narrow owner:
 
 ```text
-Use adaptive coordinator mode to add the parser regression test in
-tests/parser.test.js. One writer owns that file, do not commit or push, and
-return the fresh E0 receipt plus test results.
+Use Herdr and the herdr-orchestrator skill in adaptive coordinator mode to add
+the parser regression test in tests/parser.test.js. One writer owns that file,
+do not commit or push, and return the fresh E0 receipt plus test results.
 ```
 
 The coordinator sends one task packet. A repository change always receives E0;
-an advisor is added only when a material trigger or explicit review request
-requires it.
+an advisor is added only when you explicitly request one or a qualifying
+technical trigger fires.
 
 ### `ORCHESTRATE`
 
 Use it when ownership, dependencies, or phases require a working plan:
 
 ```text
-Use adaptive coordinator mode to implement the API and UI changes. Give each
-worker disjoint ownership, document dependencies, use a working plan, and
-stop before integration if ownership or evidence conflicts.
+Use Herdr and the herdr-orchestrator skill in adaptive coordinator mode to
+implement the API and UI changes. Give each worker disjoint ownership,
+document dependencies, use a working plan, and stop before integration if
+ownership or evidence conflicts.
 ```
 
 The coordinator registers ownership before dispatch and uses `HOLD` before any
-tripwire re-route.
+tripwire re-route. A dependent task records the upstream input fingerprint and
+stays stopped until its `READY_WHEN` condition holds; an upstream change makes
+the dependent packet stale and forces re-routing before another dispatch. On
+stale input: `HOLD` affected dependents, bump `PACKET_REVISION`, invalidate
+stale `INPUT_FINGERPRINT`, `EVIDENCE_REF`, and gate verdicts, compute new
+fingerprint, rerun R0, rerun applicable gates (G1 for plan/ownership/dependency/
+criteria changes; E0 and G2 for repository output or review evidence changes),
+and resume only after `READY_WHEN` is true on the new packet revision.
 
 ### Overlays: `CONSULT` and `ASK_USER`
 
 Request a technical assessment without giving the advisor authority:
 
 ```text
-Use adaptive coordinator mode and consult a fresh advisor on this public API
-compatibility choice. I choose Fable, GPT-5.6 Sol, or Opus; do not substitute
-if my selection is unavailable.
+Use Herdr and the herdr-orchestrator skill in adaptive coordinator mode and
+consult a fresh advisor on this public API compatibility choice. I choose
+GPT-5.6 Sol; do not substitute if it is unavailable.
 ```
+
+The other allowed advisor choices are `Fable` and `Opus`. Name exactly one
+selected model in a real request; if it is unavailable, the coordinator holds
+and asks you instead of substituting.
 
 Use `ASK_USER` for a permission, cost, credential, publication, external, or
 irreversible decision:
 
 ```text
-Hold before publishing the package. Show the exact target, scope, cost, and
+Use Herdr and the herdr-orchestrator skill in adaptive coordinator mode. Hold
+before publishing the package. Show the exact target, scope, cost, and
 rollback, then ask me; do not treat an advisor assessment as approval.
 ```
 
