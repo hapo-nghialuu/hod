@@ -54,7 +54,7 @@ hod status
 <summary>Pin a release instead of tracking <code>main</code> — recommended for teams</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.13 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.14 sh
 ```
 
 </details>
@@ -194,9 +194,10 @@ smallest route that fits the request:
 | `SINGLE` | One reversible outcome with one narrow owner | One task packet and mechanical evidence for a repository change |
 | `ORCHESTRATE` | Multiple writers, dependencies, phases, repositories, or large blast radius | A working plan, explicit ownership, and ordered coordination |
 
-`CONSULT` and `ASK_USER` are overlays, not additional modes. A consult opens a
-fresh independent advisor only when a material technical trigger exists; an
-authority, permission, cost, or external-action question pauses for you.
+`CONSULT` and `ASK_USER` are overlays, not additional modes. Within adaptive
+mode, a consult opens a fresh independent advisor when you explicitly request
+one or a qualifying technical trigger fires; an authority, permission, cost,
+or external-action question pauses for you.
 Choose the advisor from `Fable`, `GPT-5.6 Sol`, or `Opus` — the advisor gives an
 assessment, never approval. Every repository change still gets a mechanical
 E0 evidence receipt before acceptance, and every tripwire holds before

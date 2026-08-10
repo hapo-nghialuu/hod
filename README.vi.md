@@ -54,7 +54,7 @@ hod status
 <summary>Ghim một bản phát hành thay vì bám <code>main</code> — khuyến nghị cho team</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.13 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.14 sh
 ```
 
 </details>
@@ -194,12 +194,13 @@ coordinator kèm advisor. Adaptive mode chọn route nhỏ nhất phù hợp v�
 | `SINGLE` | Một kết quả có thể đảo ngược, một owner hẹp | Một task packet và bằng chứng máy móc cho thay đổi repo |
 | `ORCHESTRATE` | Nhiều writer, dependency, phase, repo, hoặc blast radius lớn | Working plan, ownership tường minh, và điều phối theo thứ tự |
 
-`CONSULT` và `ASK_USER` là overlay, không phải mode bổ sung. Consult mở một
-advisor độc lập trong session mới khi có trigger kỹ thuật đáng kể; câu hỏi về
-authority, permission, chi phí, hay hành động hướng ra ngoài sẽ dừng để bạn
-quyết. Bạn chọn advisor trong `Fable`, `GPT-5.6 Sol`, hoặc `Opus` — advisor chỉ
-đánh giá, không phê duyệt. Mọi thay đổi repo vẫn có E0 evidence receipt máy móc
-trước acceptance, và mọi tripwire đều `HOLD` trước khi route lại.
+`CONSULT` và `ASK_USER` là overlay, không phải mode bổ sung. Trong adaptive
+mode, consult mở một advisor độc lập trong session mới khi bạn yêu cầu tường
+minh hoặc khi một trigger kỹ thuật đủ điều kiện xảy ra; câu hỏi về authority,
+permission, chi phí, hay hành động hướng ra ngoài sẽ dừng để bạn quyết. Bạn
+chọn advisor trong `Fable`, `GPT-5.6 Sol`, hoặc `Opus` — advisor chỉ đánh giá,
+không phê duyệt. Mọi thay đổi repo vẫn có E0 evidence receipt máy móc trước
+acceptance, và mọi tripwire đều `HOLD` trước khi route lại.
 
 Xem [reference adaptive coordinator](references/coordinator-advisor.md) để đọc
 đủ protocol và [ví dụ sử dụng](docs/usage-guide.md).

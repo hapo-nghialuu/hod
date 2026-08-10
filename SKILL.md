@@ -61,10 +61,15 @@ coordinator or for coordinator plus advisor behavior. Without that opt-in, the
 workflow above and the existing small-task/direct-user behavior are unchanged.
 
 When active, read [Adaptive Coordinator with Tripwire Escalation](references/coordinator-advisor.md)
-as the normative reference. It defines three base modes — `DIRECT`, `SINGLE`,
-and `ORCHESTRATE` — plus `CONSULT` and `ASK_USER` overlays. `DIRECT` stays a
-fast path without a formal plan; `SINGLE` and `ORCHESTRATE` add only the
-artifacts their route requires.
+as the normative hod `0.1.14` reference. It defines three base modes —
+`DIRECT`, `SINGLE`, and `ORCHESTRATE` — plus `CONSULT` and `ASK_USER` overlays.
+Plain `DIRECT` stays ceremony-free. A `DIRECT` route may carry an independently
+triggered overlay; it then records R0 and the overlay artifact but still creates
+no worker plan or external checkpoint. `SINGLE` and `ORCHESTRATE` add only the
+artifacts their route requires. R0 v2 types uncertainty and risk, permits at
+most one route-changing read-only probe, and reruns R0 before action. An
+upstream fingerprint change holds affected dependents and invalidates their
+stale packet, gate, and evidence state under the normative reference.
 
 The adaptive protocol requires an E0 mechanical evidence receipt for every
 repository change, uses `HOLD` before tripwire re-routing, and calls a fresh
@@ -94,7 +99,7 @@ For exact three-role promises, CLI flags, and enforcement gaps, see [Role Bounda
 
 - A spoken model name is a label, not an ID. Resolve the exact string from the installed CLI before starting. If the CLI rejects it, report its error verbatim and ask — never substitute, downgrade, or retry with a guess. When no model is named, omit the flag and let the CLI use its configured default.
 - A project profile (`.claude/settings.<role>.json`) only takes effect when passed at start. A worker started bare silently discards the user's configuration — treat that as a defect. Map each role to its matching profile; never invent, substitute, or author one. A boundary role (read-only reviewer, coordinator-only controller) started without a profile is enforced by wording alone — say so in the report.
-- Refuse contradictions instead of passing them: `--dangerously-skip-permissions` disables every deny rule loaded through `--settings`, and `--continue`/`--resume` on a reviewer defeats its independence. An enforced boundary is the same contract as a written one — never route around a denied tool by shelling out or handing the action to another agent.
+- Refuse contradictions instead of passing them: `--dangerously-skip-permissions` disables every deny rule loaded through `--settings`, and `--continue`/`--resume` on a reviewer defeats its independence. An enforced boundary is the same contract as a written one — never route around a denied tool by shelling out or handing the action to another agent. The sole exception is adaptive checkpoint metadata: when the normative reference requires it, only the active coordinator may use a local shell to write the one exact external checkpoint path. That narrow control-plane write never permits task-file, repository, or worker-artifact writes, and its path restriction is wording-level plus evidence-checked where the harness leaves shell access available.
 - Continue a live agent only when the task directly extends its work with the same role and file ownership. Start fresh for review or audit, for a changed role or ownership, or when information isolation matters — and never resume a transcript for a review step: a resumed reviewer looks independent and is not.
 
 ## Lifecycle and evidence
@@ -121,7 +126,7 @@ Ownership is exact paths or narrow globs with one live writer each; shared manif
 
 ## Coordinator-only mode
 
-When the user restricts the controller to coordination, honor it for the rest of the session: the line is between performing and reading. The controller performs nothing — no file edits (including "quick fixes"), builds, tests, debugging, reviewing, conflict resolution, or committing self-authored changes — and reads everything: planning, prompts, Herdr control commands, short read-only inspection, evidence judgment, and commits of verified worker changes when authorized. Delegating work while accepting claims without reading evidence is not delegation — it is abdication. Do not assume this mode without the user's request; for a single small task it costs more than it returns.
+When the user restricts the controller to coordination, honor it for the rest of the session: the line is between performing and reading. The controller performs nothing — no task-file edits (including "quick fixes"), builds, tests, debugging, reviewing, conflict resolution, or committing self-authored changes — and reads everything: planning, prompts, Herdr control commands, short read-only inspection, evidence judgment, and commits of verified worker changes when authorized. The only permitted write is the exact external adaptive checkpoint metadata required by the normative protocol; it is a narrow control-plane exception, not task work, and does not authorize any repository write. Delegating work while accepting claims without reading evidence is not delegation — it is abdication. Do not assume this mode without the user's request; for a single small task it costs more than it returns.
 
 ## Modes and detailed guidance
 

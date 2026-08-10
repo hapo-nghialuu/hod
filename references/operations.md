@@ -34,43 +34,193 @@ normative rules, gates, and exceptions are in
 [Adaptive Coordinator with Tripwire Escalation](coordinator-advisor.md); do not
 recreate that reference in an operations packet.
 
-### R0 before a dispatch or overlay
+### R0 v2, one bounded scout, and dependent invalidation
 
 For a worker dispatch, `CONSULT`, `ASK_USER`, or an existing checkpoint, record
-the smallest useful envelope before acting:
+the smallest useful envelope before acting. This includes a `DIRECT` base mode
+when it carries `CONSULT` or `ASK_USER`:
 
 ```text
-ROUTE_VERSION: 1
-BASE_MODE: SINGLE | ORCHESTRATE
+ROUTE_VERSION: 2
+BASE_MODE: DIRECT | SINGLE | ORCHESTRATE
 FACTS: <at most three>
 HARD_TRIGGERS: none | <IDs>
+UNCERTAINTY_KIND: NONE | DISCOVERABLE_FACT | TECHNICAL_JUDGMENT | USER_PREFERENCE | USER_AUTHORITY | EXECUTION_OUTCOME
 UNCERTAINTY: none | <route-changing unknown>
-NEXT: dispatch | read-only-scout | consult | ask-user
+DECISION_RISK: LOW_REVERSIBLE | MATERIAL | HIGH_OR_IRREVERSIBLE
+PROBE_BUDGET: 0 | 1
+PROBES_USED: 0 | 1
+NEXT_OBSERVATION: none | <one read-only observation and route-changing results>
+INVALIDATE_IF: none | <route-staling fact, revision, authority, or outcome>
+NEXT: dispatch | read-only-scout | consult | ask-user | stop
+STOP_REASON: none | <required when NEXT is stop>
 ```
 
-Do not print or persist this envelope for a clear `DIRECT` answer.
+Do not structure, print, or persist this envelope for plain `DIRECT` without an
+overlay. Apply the canonical precedence in the normative reference. Scout only
+when `UNCERTAINTY_KIND` is `DISCOVERABLE_FACT`, `PROBES_USED: 0`, and the named
+`NEXT_OBSERVATION` can change the route. Then set `PROBES_USED: 1`, add the
+fact, and rerun R0. Never take a second scout; ask the user when their decision
+can resolve the remaining uncertainty, otherwise set `NEXT: stop` and explain
+`STOP_REASON`.
+
+For an `ORCHESTRATE` node, keep `NODE_ID`, `OWNER`, `DEPENDS_ON`, `READY_WHEN`,
+`INPUT_FINGERPRINT`, `INVALIDATE_IF`, `COMPLETION_CRITERION`, and `EVIDENCE_REF`
+in its versioned packet. When an upstream fingerprint changes: `HOLD` affected
+dependents, bump `PACKET_REVISION`, invalidate affected `INPUT_FINGERPRINT`,
+gate verdicts, and `EVIDENCE_REF`, compute the new fingerprint, then rerun R0,
+G1, and G2 where the normative applicability rules require them. Dispatch only
+after the new packet satisfies `READY_WHEN`.
 
 ### E0 receipt capture
 
-For every repository-changing task, capture fresh values from Git and the
-actual check process. A bounded shell inspection can establish the revision
-and changed paths; run verbose checks in a pane with a fresh sentinel:
+For every repository-changing task, establish a clean baseline before
+dispatch. Resolve one canonical repository root even when the controller starts
+inside a subdirectory, then run every Git capture relative to that root. Capture
+`HEAD` on both sides of a status read, and require no staged, unstaged, or
+non-ignored untracked entry. If either SHA differs or status is non-empty, use
+`HOLD`; do not assign pre-existing dirt to the task:
 
 ```bash
-base_sha=$(git rev-parse HEAD)
-head_sha=$(git rev-parse HEAD)
-changed_paths=$(git diff --name-only "$base_sha" --)
-diff_sha=$(git diff --binary "$base_sha" -- | shasum -a 256 | awk '{print $1}')
+set -o pipefail
+if ! repo_root=$(git rev-parse --show-toplevel); then
+  printf '%s\n' 'E0 cannot resolve the repository root; HOLD.' >&2
+  exit 1
+fi
+if ! repo_root=$(cd -- "$repo_root" && pwd -P); then
+  printf '%s\n' 'E0 cannot canonicalize the repository root; HOLD.' >&2
+  exit 1
+fi
+if ! e0_tmp=$(mktemp -d "${TMPDIR:-/tmp}/hod-e0.XXXXXX"); then
+  printf '%s\n' 'E0 cannot create a private capture directory; HOLD.' >&2
+  exit 1
+fi
+cleanup_e0() { rm -rf -- "$e0_tmp"; }
+trap cleanup_e0 EXIT HUP INT TERM
+
+if ! base_sha_before=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}'); then
+  printf '%s\n' 'E0 cannot resolve the baseline HEAD; HOLD.' >&2
+  exit 1
+fi
+if ! git -C "$repo_root" status --porcelain=v1 -z --untracked-files=all \
+  >"$e0_tmp/baseline.status"; then
+  printf '%s\n' 'E0 cannot read baseline status; HOLD.' >&2
+  exit 1
+fi
+if ! base_sha_after=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}'); then
+  printf '%s\n' 'E0 cannot re-resolve the baseline HEAD; HOLD.' >&2
+  exit 1
+fi
+if [ "$base_sha_before" != "$base_sha_after" ] ||
+  [ -s "$e0_tmp/baseline.status" ]; then
+  printf '%s\n' 'E0 baseline is not stable and clean; HOLD.' >&2
+  exit 1
+fi
+base_sha=$base_sha_after
+```
+
+Run the required checks next, in a pane with a fresh sentinel:
+
+```bash
 sentinel="VERIFY_$(date +%s)_$RANDOM"
 herdr pane run "$check_pane" "<check>; rc=\$?; printf '%s exit=%s\\n' '$sentinel' \"\$rc\""
 herdr pane wait-output "$check_pane" --match "$sentinel" --timeout 600000
 herdr pane read "$check_pane" --source recent-unwrapped --lines 120
-git status --short
 ```
 
-Fill the E0 fields from those outputs, not from a worker's prose. An absent
-sentinel, unknown exit, changed revision, ownership conflict, or stale artifact
-is `HOLD` and requires a new capture.
+Only after the checks settle and every writer is quiescent, capture the four
+change domains twice. Each pass brackets the capture with `HEAD`, keeps paths
+NUL-delimited and repository-relative, and anchors committed and staged diffs
+to that pass's `HEAD`. The two complete passes must match byte-for-byte:
+
+```bash
+capture_e0_pass() {
+  local pass_dir=$1
+  local head_before
+  local head_after
+  local untracked_path
+
+  mkdir -p -- "$pass_dir" || return 1
+  head_before=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}') ||
+    return 1
+  git -C "$repo_root" rev-parse --verify "${base_sha}^{commit}" \
+    >/dev/null || return 1
+  git -C "$repo_root" merge-base --is-ancestor \
+    "$base_sha" "$head_before" || return 1
+  printf '%s\n' "$head_before" >"$pass_dir/head"
+
+  if ! {
+    git -C "$repo_root" diff --name-only -z --no-renames \
+      "$base_sha" "$head_before" -- || exit 1
+    git -C "$repo_root" diff --cached --name-only -z --no-renames \
+      "$head_before" -- || exit 1
+    git -C "$repo_root" diff --name-only -z --no-renames -- || exit 1
+    git -C "$repo_root" ls-files --others --exclude-standard -z || exit 1
+  } | LC_ALL=C sort -zu >"$pass_dir/paths"; then
+    return 1
+  fi
+
+  {
+    printf 'COMMITTED\0'
+    git -C "$repo_root" diff --binary --no-color --no-ext-diff \
+      --no-textconv --no-renames "$base_sha" "$head_before" -- || return 1
+    printf '\0STAGED\0'
+    git -C "$repo_root" diff --cached --binary --no-color --no-ext-diff \
+      --no-textconv --no-renames "$head_before" -- || return 1
+    printf '\0UNSTAGED\0'
+    git -C "$repo_root" diff --binary --no-color --no-ext-diff \
+      --no-textconv --no-renames -- || return 1
+    printf '\0UNTRACKED\0'
+    git -C "$repo_root" ls-files --others --exclude-standard -z |
+      while IFS= read -r -d '' untracked_path; do
+        printf '%s\0' "$untracked_path"
+        git -C "$repo_root" hash-object --no-filters -- "$untracked_path" ||
+          exit 1
+      done || return 1
+  } >"$pass_dir/payload" || return 1
+
+  shasum -a 256 "$pass_dir/payload" | awk '{print $1}' \
+    >"$pass_dir/hash" || return 1
+  grep -Eq '^[0-9a-f]{64}$' "$pass_dir/hash" || return 1
+  git -C "$repo_root" status --porcelain=v1 -z --untracked-files=all \
+    >"$pass_dir/status" || return 1
+  head_after=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}') ||
+    return 1
+  [ "$head_before" = "$head_after" ] || return 1
+}
+
+if ! capture_e0_pass "$e0_tmp/first" ||
+  ! capture_e0_pass "$e0_tmp/second"; then
+  printf '%s\n' 'E0 cannot capture two complete repository states; HOLD.' >&2
+  exit 1
+fi
+for artifact in head paths payload hash status; do
+  if ! cmp -s "$e0_tmp/first/$artifact" "$e0_tmp/second/$artifact"; then
+    printf '%s\n' 'E0 repository changed during capture; HOLD.' >&2
+    exit 1
+  fi
+done
+
+head_sha=$(cat "$e0_tmp/second/head")
+diff_sha=$(cat "$e0_tmp/second/hash")
+changed_paths_file=$e0_tmp/second/paths
+dirty_state_file=$e0_tmp/second/status
+```
+
+The explicit diff flags keep the receipt independent of color, rename,
+text-conversion, and external-diff configuration. Read the NUL-delimited
+`changed_paths_file` and `dirty_state_file` directly rather than storing them in
+shell variables. Every component command must exit successfully. Fill E0 from
+these runtime outputs, not worker prose. An absent sentinel, unknown exit,
+changed revision, unstable double capture, ownership conflict, incomplete
+domain, or stale artifact is `HOLD` and requires a new capture. This is bounded
+stabilization after writers quiesce, not an atomic filesystem snapshot or a
+claim to defeat an adversarial ABA mutation.
+
+If G2 runs, send this post-check receipt. After the verdict, repeat the entire
+stable double capture and compare `HEAD_SHA`, all four change sets, their union,
+`DIFF_SHA256`, and dirty state with the packet. Any mismatch invalidates E0 and
+G2; rerun checks, E0, and G2 on the new state before acceptance.
 
 ### External checkpoint and handoff
 
@@ -78,16 +228,55 @@ Create the checkpoint outside the checkout only when the reference requires
 one:
 
 ```bash
-checkpoint_dir=$(mktemp -d "${TMPDIR:-/tmp}/hod-adaptive.XXXXXX")
+if ! repo_root=$(git rev-parse --show-toplevel); then
+  printf '%s\n' 'Cannot resolve the checkout root; HOLD.' >&2
+  exit 1
+fi
+if ! repo_root=$(cd -- "$repo_root" && pwd -P); then
+  printf '%s\n' 'Cannot canonicalize the checkout root; HOLD.' >&2
+  exit 1
+fi
+temp_root=${TMPDIR:-/tmp}
+if ! temp_root=$(cd -- "$temp_root" && pwd -P); then
+  printf '%s\n' 'Cannot canonicalize the temporary root; HOLD.' >&2
+  exit 1
+fi
+case "$temp_root/" in
+  "$repo_root/"*)
+    printf '%s\n' 'Temporary root is inside the checkout; HOLD.' >&2
+    exit 1
+    ;;
+esac
+umask 077
+if ! checkpoint_dir=$(mktemp -d "$temp_root/hod-adaptive.XXXXXX"); then
+  printf '%s\n' 'Cannot create the external checkpoint directory; HOLD.' >&2
+  exit 1
+fi
+if ! checkpoint_dir=$(cd -- "$checkpoint_dir" && pwd -P); then
+  printf '%s\n' 'Cannot canonicalize the checkpoint directory; HOLD.' >&2
+  exit 1
+fi
+case "$checkpoint_dir/" in
+  "$repo_root/"*)
+    printf '%s\n' 'Checkpoint resolved inside the checkout; HOLD.' >&2
+    exit 1
+    ;;
+esac
 checkpoint_path="$checkpoint_dir/checkpoint.md"
 ```
 
 Record the absolute path in the handoff. Only the active coordinator writes
-bounded metadata there; workers and advisors do not. On resume, reconcile
-Herdr state, Git state, actual artifacts, and a fresh E0 receipt before any
-dispatch. If the external path is not writable, do not broaden the sandbox or
-fall back into the checkout: use a fresh independent R0, otherwise `HOLD +
-ASK_USER`. Retain the directory until the user authorizes cleanup.
+bounded metadata there; workers and advisors do not. This exact local-shell
+write is the sole sanctioned control-plane exception to the no-shell-bypass
+rule. It authorizes only the one checkpoint path outside the checkout, never a
+task file, repository path, worker artifact, or substitute location. Existing
+profiles do not mechanically confine an available shell to that path, so this
+limit is wording-level and evidence-checked, not a claimed sandbox guarantee.
+On resume, reconcile Herdr state, Git state, actual artifacts, and a fresh E0
+receipt before any dispatch. If the external path is not writable, do not
+broaden the sandbox or fall back into the checkout: use a fresh independent R0,
+otherwise `HOLD + ASK_USER`. Retain the directory until the user authorizes
+cleanup.
 
 ### Permission prompts
 
@@ -193,10 +382,28 @@ the controller's context.
 ```text
 <Concrete outcome in direct-user voice>
 
+Packet ID: <stable UUID for this task lineage>
+Task ID: <stable UUID for the parent user objective>
+Packet revision: <positive integer starting at 1>
+Attempt ID: <UUID unique to this dispatch>
+Attempt number: <positive integer starting at 1>
+Retry limit: <integer from 0 to 2 fixed before attempt 1>
+Retries used: <attempt number minus 1>
 Work context: <absolute repository or worktree path>
 Files you may modify: <exact paths or globs, or "none; read-only">
 Files to read: <specific files>
 Dependency inputs: <established interfaces, decisions, or artifacts>
+
+ORCHESTRATE node (omit for DIRECT/SINGLE):
+NODE_ID: <stable node ID>
+OWNER: <one writer and exact paths or narrow globs>
+DEPENDS_ON: none | <upstream NODE_IDs>
+READY_WHEN: <observable dispatch precondition>
+INPUT_FINGERPRINT: <upstream revision and artifact or evidence hashes>
+INVALIDATE_IF: <observable upstream or input change that makes this packet stale>
+COMPLETION_CRITERION: <one or more verifiable criteria>
+EVIDENCE_REF: none | <current evidence path, ID, or hash>
+
 Acceptance criteria:
 - <observable behavior or artifact>
 - <required compile, lint, test, or review evidence>
@@ -212,6 +419,11 @@ and unresolved questions.
 
 State whether an input is verified, inferred, or worker-reported when the
 distinction matters.
+
+Increment the packet revision when a material input changes. An unchanged
+retry gets a new attempt ID and consumes the recorded budget. Once exhausted,
+freeze the path and ask the user; a new session, rewording, packet ID, or
+revision must not reset the budget.
 
 ## Revive a previous session
 
