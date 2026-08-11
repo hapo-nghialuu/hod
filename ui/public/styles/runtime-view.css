@@ -1,0 +1,138 @@
+/* runtime-view.css — spaces, agents, and terminal controls */
+.brand-prompt {
+  color: var(--fg-muted);
+}
+
+.topbar-brand {
+  text-shadow: 0 0 12px rgba(217, 119, 87, 0.24);
+}
+
+.pane-body {
+  scrollbar-color: var(--line-strong) var(--bg-sunken);
+}
+
+.pane-spaces .pane-body,
+.pane-agents .pane-body {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+}
+
+.space-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-2);
+  min-height: var(--target);
+  padding: var(--space-2);
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: var(--border-width) solid var(--line);
+  text-align: left;
+}
+
+.space-button:hover,
+.space-button.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(217, 119, 87, 0.16);
+}
+
+.space-label,
+.agent-name,
+.setting-key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.space-counts {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-1);
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+}
+
+.ascii-bars {
+  color: var(--accent);
+  white-space: pre-wrap;
+}
+
+.agent-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--line);
+}
+
+.agent-row.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(217, 119, 87, 0.16);
+}
+
+.agent-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.agent-meta,
+.transcript-meta {
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+}
+
+.bracket-button {
+  min-width: var(--target);
+  color: var(--accent);
+  background: transparent;
+  border-color: var(--accent-dim);
+  text-align: center;
+}
+
+.bracket-button:hover:not(:disabled) {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.bracket-button.is-selected {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.follow-toggle {
+  flex: 0 0 auto;
+}
+
+.pane-transcript .pane-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.transcript-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.transcript-text {
+  min-height: 12rem;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: var(--border-width) solid var(--line-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .agent-heading {
+    flex-wrap: wrap;
+  }
+}

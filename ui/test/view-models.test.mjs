@@ -1,0 +1,71 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  asciiOccupancy,
+  asciiProgress,
+  buildAgentViewModels,
+  buildSpaceViewModels,
+  filterAgents,
+  progressPercent,
+  sortAgents,
+  statusTag,
+} from '../public/modules/view-models.mjs';
+
+const agents = [
+  { paneId: 'idle-1', workspaceId: 'alpha', display: 'zulu', status: 'idle' },
+  { paneId: 'done-1', workspaceId: 'alpha', display: 'done', status: 'done' },
+  { paneId: 'working-1', workspaceId: 'beta', display: 'worker', status: 'working' },
+  { paneId: 'blocked-1', workspaceId: 'alpha', display: 'blocked', status: 'blocked' },
+  { paneId: 'mystery-1', workspaceId: 'alpha', display: 'mystery', status: 'strange' },
+];
+
+test('agents filter by workspace and sort by blocked, working, idle, done, unknown', () => {
+  const original = agents.slice();
+  const filtered = filterAgents(agents, 'alpha');
+  assert.deepEqual(filtered.map((agent) => agent.paneId), ['idle-1', 'done-1', 'blocked-1', 'mystery-1']);
+  const sorted = sortAgents(filtered);
+  assert.deepEqual(sorted.map((agent) => agent.paneId), ['blocked-1', 'idle-1', 'done-1', 'mystery-1']);
+  assert.deepEqual(agents, original);
+});
+
+test('view models include text status tags independent of color', () => {
+  const models = buildAgentViewModels(agents);
+  assert.deepEqual(models.map((agent) => agent.statusTag), ['[ERR]', '[WORK]', '[WAIT]', '[DONE]', '[UNKNOWN]']);
+  assert.deepEqual(models.map((agent) => agent.id), ['blocked-1', 'working-1', 'idle-1', 'done-1', 'mystery-1']);
+  assert.equal(statusTag({ status: 'running' }), '[WORK]');
+  assert.equal(statusTag({ status: 'failed' }), '[ERR]');
+  assert.equal(models[0].statusText, 'blocked');
+  assert.equal(buildAgentViewModels([{ paneId: 'named', name: 'Zed', display: 'Claude' }])[0].displayName, 'Zed');
+});
+
+test('same-status agents sort by display name and preserve duplicate-name order', () => {
+  const sameStatus = [
+    { paneId: 'z', display: 'zulu', status: 'working' },
+    { paneId: 'a-second', display: 'alpha', status: 'working' },
+    { paneId: 'a-first', display: 'alpha', status: 'working' },
+  ];
+  assert.deepEqual(sortAgents(sameStatus).map((agent) => agent.paneId), ['a-second', 'a-first', 'z']);
+});
+
+test('progress and occupancy helpers clamp invalid and out-of-range values', () => {
+  assert.equal(progressPercent(-4, 10), 0);
+  assert.equal(progressPercent(20, 10), 100);
+  assert.equal(progressPercent(4, 0), 0);
+  assert.equal(progressPercent(Number.NaN, 10), 0);
+  assert.equal(asciiProgress(-4, 10, 4), '[....] 0%');
+  assert.equal(asciiProgress(20, 10, 4), '[||||] 100%');
+  assert.equal(asciiOccupancy(3, 10, 4), '[|...] 30%');
+  assert.equal(asciiProgress(5, 10, 100).length, asciiProgress(5, 10, 80).length);
+});
+
+test('spaces include ALL, preserve natural workspace order, counts, and aggregate status', () => {
+  const spaces = buildSpaceViewModels({ workspaces: [
+    { id: 'space10', number: 10, label: 'Ten', paneCount: 2, tabCount: 1, status: 'working' },
+    { id: 'space2', number: 2, label: 'Two', paneCount: 3, tabCount: 2, status: 'blocked' },
+  ] });
+  assert.deepEqual(spaces.map((space) => space.id), [null, 'space2', 'space10']);
+  assert.deepEqual([spaces[0].paneCount, spaces[0].tabCount], [5, 3]);
+  assert.equal(spaces[0].statusTag, '[ERR]');
+  assert.equal(spaces[1].statusText, 'blocked');
+});

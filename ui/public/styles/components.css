@@ -1,0 +1,132 @@
+/* components.css — panes, controls, tags, dialogs, and content states */
+button {
+  appearance: none;
+  min-height: var(--target);
+  padding: var(--space-1) var(--space-3);
+  color: inherit;
+  background: var(--bg-raised);
+  border: var(--border-width) solid var(--line);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--line-strong);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: var(--border-width) solid var(--line);
+}
+
+.pane-transcript {
+  border-right: 0;
+}
+
+.pane-settings {
+  grid-column: 1 / -1;
+}
+
+.pane-title {
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-4);
+  color: var(--fg-muted);
+  border-bottom: var(--border-width) solid var(--line);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pane-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+.empty-state {
+  max-width: 48ch;
+  color: var(--fg-muted);
+  line-height: 1.7;
+}
+
+.status-ok { color: var(--ok-fg); }
+.status-warn { color: var(--warn-fg); }
+.status-err { color: var(--err-fg); }
+
+.tag {
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid currentColor;
+  font-size: var(--fs-xxs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.confirm-dialog {
+  z-index: var(--z-dialog);
+  width: min(32rem, calc(100vw - 2 * var(--space-4)));
+  margin: auto;
+  padding: var(--space-5);
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: var(--border-width) solid var(--line-strong);
+}
+
+.confirm-dialog::backdrop {
+  background: rgba(14, 14, 13, 0.8);
+}
+
+.confirm-message {
+  margin-top: var(--space-3);
+  color: var(--fg-muted);
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.btn-primary {
+  color: var(--color-primary-foreground);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.noscript {
+  padding: var(--space-4);
+  color: var(--err-fg);
+  background: var(--bg-sunken);
+  border-top: var(--border-width) solid var(--err);
+}
+
+*[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .pane {
+    min-height: 12rem;
+    border-right: 0;
+    border-bottom: var(--border-width) solid var(--line);
+  }
+
+  .pane-transcript {
+    min-height: 20rem;
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .pane-body {
+    padding: var(--space-3);
+  }
+}

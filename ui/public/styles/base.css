@@ -1,0 +1,151 @@
+/* base.css — reset, type, focus, scanline, and motion primitives */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius);
+}
+
+html {
+  min-height: 100%;
+  color-scheme: dark only;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Focus is always visible; action controls also invert for the terminal look. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:where(a, button):focus-visible {
+  background-color: var(--accent);
+  color: var(--bg);
+}
+
+:focus-visible .icon {
+  color: var(--bg);
+}
+
+::selection {
+  color: var(--bg);
+  background: var(--accent);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Block cursor for prompt output; motion is disabled below when requested. */
+.prompt-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1em;
+  margin-left: 0.25em;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: cursor-blink 1.1s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  50% { background: transparent; }
+}
+
+/* Fixed and faint; never placed inside a transcript or other scroll container. */
+.scanline {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scanline);
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    rgba(250, 249, 245, 0.025) 3px,
+    rgba(250, 249, 245, 0.025) 4px
+  );
+  opacity: 0.65;
+}
+
+/* Skip link is available to keyboard users without affecting the shell layout. */
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: var(--space-2);
+  z-index: var(--z-topbar);
+  padding: var(--space-2) var(--space-3);
+  color: var(--bg);
+  background: var(--accent);
+  transform: translateY(-200%);
+  transition: transform var(--dur-base) var(--ease);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: none;
+}
+
+.icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  vertical-align: middle;
+  stroke: currentColor;
+}
+
+/* Reduced motion removes blinking, transitions, and decorative scanlines. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .prompt-cursor,
+  .scanline {
+    animation: none;
+    display: none;
+  }
+}
