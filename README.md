@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hapo-nghialuu/hod/actions/workflows/validate.yml"><img src="https://github.com/hapo-nghialuu/hod/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
+  <!-- CI badge hidden while automatic validation is paused. -->
   <a href="https://github.com/hapo-nghialuu/hod/releases"><img src="https://img.shields.io/github/v/release/hapo-nghialuu/hod" alt="release"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue" alt="platform">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
@@ -64,8 +64,18 @@ clones the skill into `~/.hod/skill/`, puts the `hod` executable on
 `~/.local/bin/`, and links global adapters so every agent CLI can find it.
 Attach a single project instead with `hod install --project /path/to/repo`.
 
-Recommended next: `herdr integration install claude` (and `codex`) so the
-sidebar reports authoritative agent states rather than guesses.
+Recommended next: install the matching Herdr integration for each CLI you
+actually run — `herdr integration install claude`, `herdr integration install
+codex`, or `herdr integration install grok`. The right integration makes agent
+state and session identity authoritative in the sidebar rather than guessed;
+install one per CLI you use, and only for the ones you use.
+
+**Integrations vs plugins.** Herdr *integrations* are the connectors above —
+they give the sidebar authoritative per-CLI agent state and session identity.
+Herdr *plugins* are a separate, optional extension surface: third-party
+actions, event hooks, and plugin panes. hod never requires a plugin. See
+[Herdr integrations](https://herdr.dev/docs/integrations/) and
+[Herdr plugin APIs](https://herdr.dev/docs/socket-api/#plugin-apis).
 
 ### 3 · Run your first orchestrated task
 
@@ -124,7 +134,7 @@ panes, checks their output against real diffs and real test runs, and comes
 back with one answer — plus a list of anything only you can decide.
 
 <p align="center">
-  <img src="assets/hod-flow-en.svg" alt="You → controller → workers → verified evidence back" width="880">
+  <img src="assets/hod-flow-en.svg" alt="You → adaptive controller → workers, reviewer, and optional advisor → verified evidence back" width="880">
 </p>
 
 You never manage the workers. You never chase a pane. You get evidence, not
@@ -216,7 +226,7 @@ the complete protocol and [usage examples](docs/usage-guide.md).
 | `hod status` | ✓/✗ one-liners: prerequisites, agent CLIs, checkout, adapters, PATH. Exit 0 when healthy |
 | `hod doctor` | Everything `status` checks plus remediation commands, adapter resolution, checkout mode (branch vs pinned), integration status |
 | `hod update` | Fast-forward the skill; a pinned checkout moves to the newest tag. Refuses a dirty tree |
-| `hod settings list` | Show Claude role profiles, equivalent Codex flags, and ready-to-paste start commands |
+| `hod settings list` | Show Claude role profiles and equivalent Codex flags; Grok uses its native flags — no templates printed |
 | `hod settings install [--role <r>] [--force]` | Write role profiles into a project's `.claude/` |
 | `hod uninstall [--purge]` | Remove only adapters that resolve into `~/.hod/skill`, and strip the reminder block; never touches foreign files |
 
@@ -382,12 +392,12 @@ herdr-orchestrator/
 ├── bin/hod                     # the CLI — install, doctor, settings, update
 ├── install.sh                  # curl | sh bootstrap (HOD_REF pins a version)
 ├── scripts/
-│   ├── test-hod.sh             # 55 hermetic CLI tests
+│   ├── test-hod.sh             # 125 hermetic CLI tests
 │   └── validate.sh             # syntax + frontmatter + markdown links
 ├── templates/                  # policy template + role permission profiles
 ├── docs/                       # human guides
 ├── assets/                     # README artwork
-└── .github/workflows/          # CI: all test entrypoints on Ubuntu + macOS
+└── .github/workflows/          # Manual validation on Ubuntu + macOS; auto-run paused
 ```
 
 ## What it does not do
@@ -404,7 +414,7 @@ herdr-orchestrator/
   Grok use their own native flags (documented, not templated).
 - Capability detection reads installed `--help` output — a future Herdr that
   rewords its help fails closed (safely) until the skill is updated.
-- Herdr is pre-1.0; this project tracks current stable (tested against 0.7.5)
+- Herdr is pre-1.0; this project tracks current stable (tested against 0.8.0)
   with a best-effort legacy path for 0.7.1.
 - Native Windows is untested.
 
@@ -541,7 +551,7 @@ internal sub-agents — no Herdr involved.
 | --- | --- | --- |
 | "requires a Herdr-managed pane" | You started the CLI outside Herdr | Run `herdr` first, start the agent inside a pane |
 | Skill never activates | The request did not name it | Say both "Herdr" and "herdr-orchestrator" |
-| Sidebar shows no state for an agent | No integration for that kind | `herdr integration install <kind>` — Grok has none by design |
+| Sidebar shows no state for an agent | No integration installed for that kind | `herdr integration install <kind>` — e.g. `herdr integration install grok`. Install only the ones matching CLIs you use |
 | `hod: command not found` | `~/.local/bin` is not on `PATH` | Add the export line `hod` printed, open a new terminal |
 | A role profile is not enforcing | `--dangerously-skip-permissions` was also passed | Drop that flag — it overrides every deny rule |
 | Worker seems stuck | It may be blocked, not dead | Read its pane; if it is waiting on a decision, answer through the controller |
@@ -566,7 +576,7 @@ Things that **never** happen without your say-so:
 
 Things that are **structurally** prevented, not merely discouraged:
 
-- A worker cannot start more agents (except the controller tier in portfolio mode, capped at two levels)
+- Delegation is capped where the harness enforces it: the Claude controller and reviewer profiles deny the in-process `Agent` tool, and the controller tier in portfolio mode is capped at two levels. On roles and CLI/version splits without such enforcement (impl profiles, some Codex versions), no-spawn is wording- and evidence-checked — the controller looks for child-agent work — not structural
 - A role profile removes tools from the agent — it cannot use what it does not have
 - Policy files live outside every checkout, so no agent with repository write access can widen its own authority
 - `hod uninstall` only removes symlinks that resolve into its own checkout
