@@ -16,7 +16,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Repository validation
         run: ./scripts/validate.sh
       - name: hod CLI behavioral tests
         run: ./scripts/test-hod.sh
+      - name: hod UI tests
+        run: npm --prefix ui test
+      - name: hod UI checks
+        run: npm --prefix ui run check

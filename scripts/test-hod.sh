@@ -865,6 +865,166 @@ expect_output_contains 'version reports 0.1.14' 'hod 0.1.14' "$hod" version
 expect_success 'no-args prints usage' "$hod"
 
 # ---------------------------------------------------------------------------
+# ui launcher: isolated Node gate, argv forwarding, and entry safety
+# ---------------------------------------------------------------------------
+ui_fixture_root=$tmp_root/ui-launcher
+fake_node_dir=$ui_fixture_root/bin
+ui_home=$ui_fixture_root/home
+mkdir -p -- "$fake_node_dir" "$ui_home"
+
+fake_node=$fake_node_dir/node
+cat >"$fake_node" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == --version ]]; then
+  printf '%s\n' "${FAKE_NODE_VERSION:-v20.0.0}"
+  exit 0
+fi
+
+printf '%s\0' "$@" >"${FAKE_NODE_ARGV:?}"
+exit "${FAKE_NODE_EXIT:-0}"
+EOF
+chmod +x "$fake_node"
+
+# Keep the dummy entry in the already-created temporary skill checkout. Never
+# create a server entry in the real repository; the source checkout currently
+# has no ui/server.mjs, so fallback-only real launches remain unavailable.
+mkdir -p -- "$skill_dir/ui"
+printf '%s\n' '// disposable HOD UI launcher entry' >"$skill_dir/ui/server.mjs"
+
+ui_project="$tmp_root/projects/ui project with spaces"
+mkdir -p -- "$ui_project"
+
+run_fake_ui() {
+  local argv_file=$1
+  local node_version=$2
+  local node_exit=$3
+  shift 3
+
+  env \
+    HOME="$ui_home" \
+    HOD_HOME="$hod_home" \
+    HOD_BIN_DIR="$bin_dir" \
+    HOD_CLAUDE_DIR="$claude_dir" \
+    HOD_AGENTS_DIR="$agents_dir" \
+    HOD_REPO_URL="$src_repo" \
+    PATH="$fake_node_dir:$PATH" \
+    FAKE_NODE_ARGV="$argv_file" \
+    FAKE_NODE_VERSION="$node_version" \
+    FAKE_NODE_EXIT="$node_exit" \
+    "$hod" ui "$@"
+}
+
+ui_argv_log=$tmp_root/ui-argv.log
+ui_argv_expected=$tmp_root/ui-argv.expected
+expect_success 'ui launches with a spaced project and port 0' \
+  run_fake_ui "$ui_argv_log" v20.0.0 0 \
+  --project "$ui_project" --port 0 --no-open
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --project "$ui_project" --port 0 --no-open >"$ui_argv_expected"
+expect_success 'ui preserves exact argv and spaced paths' \
+  cmp -s "$ui_argv_expected" "$ui_argv_log"
+
+ui_max_log=$tmp_root/ui-max-argv.log
+ui_max_expected=$tmp_root/ui-max-argv.expected
+expect_success 'ui accepts port 65535' \
+  run_fake_ui "$ui_max_log" v20.0.0 0 --port 65535
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --port 65535 >"$ui_max_expected"
+expect_success 'ui preserves the maximum port argv' \
+  cmp -s "$ui_max_expected" "$ui_max_log"
+
+ui_unknown_log=$tmp_root/ui-unknown-argv.log
+ui_unknown_expected=$tmp_root/ui-unknown-argv.expected
+expect_success 'ui delegates an unknown option to server parsing' \
+  run_fake_ui "$ui_unknown_log" v20.0.0 0 --unknown-ui-option
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --unknown-ui-option >"$ui_unknown_expected"
+expect_success 'ui preserves the unknown option argv' \
+  cmp -s "$ui_unknown_expected" "$ui_unknown_log"
+
+ui_duplicate_log=$tmp_root/ui-duplicate-argv.log
+ui_duplicate_expected=$tmp_root/ui-duplicate-argv.expected
+expect_success 'ui delegates a duplicate option to server parsing' \
+  run_fake_ui "$ui_duplicate_log" v20.0.0 0 --port 1 --port 2
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --port 1 --port 2 >"$ui_duplicate_expected"
+expect_success 'ui preserves duplicate option argv' \
+  cmp -s "$ui_duplicate_expected" "$ui_duplicate_log"
+
+ui_missing_log=$tmp_root/ui-missing-value-argv.log
+ui_missing_expected=$tmp_root/ui-missing-value-argv.expected
+expect_success 'ui delegates a missing option value to server parsing' \
+  run_fake_ui "$ui_missing_log" v20.0.0 0 --project
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --project >"$ui_missing_expected"
+expect_success 'ui preserves missing-value argv' \
+  cmp -s "$ui_missing_expected" "$ui_missing_log"
+
+ui_exit_log=$tmp_root/ui-exit-argv.log
+if run_fake_ui "$ui_exit_log" v20.0.0 37; then
+  ui_exit_rc=0
+else
+  ui_exit_rc=$?
+fi
+if [[ $ui_exit_rc -eq 37 ]]; then
+  record 'ui preserves the server exit status' true
+else
+  printf '  expected ui exit 37, got %s\n' "$ui_exit_rc" >&2
+  record 'ui preserves the server exit status' false
+fi
+
+ui_old_node_log=$tmp_root/ui-old-node.log
+rm -f -- "$ui_old_node_log"
+expect_rejection 'ui rejects Node versions below 20' \
+  run_fake_ui "$ui_old_node_log" v19.9.0 0
+expect_success 'ui does not launch with an old Node' \
+  test ! -e "$ui_old_node_log"
+
+ui_outside_entry=$tmp_root/outside-ui-entry.fixture
+printf '%s\n' '// outside disposable entry' >"$ui_outside_entry"
+rm -f -- "$skill_dir/ui/server.mjs"
+ln -s -- "$ui_outside_entry" "$skill_dir/ui/server.mjs"
+ui_symlink_log=$tmp_root/ui-symlink.log
+expect_rejection 'ui refuses a symlinked installed entry' \
+  run_fake_ui "$ui_symlink_log" v20.0.0 0
+expect_success 'ui does not launch through a symlinked entry' \
+  test ! -e "$ui_symlink_log"
+rm -f -- "$skill_dir/ui/server.mjs"
+
+# Exercise missing-entry rejection from a temporary copy so the assertion is
+# independent of whether a concurrent checkout later adds the real fallback.
+missing_repo=$tmp_root/missing-ui-repo
+missing_hod=$missing_repo/bin/hod
+missing_home=$tmp_root/missing-ui-home
+mkdir -p -- "$missing_repo/bin" "$missing_home"
+cp -- "$hod" "$missing_hod"
+chmod +x "$missing_hod"
+run_missing_ui() {
+  local argv_file=$1
+  shift
+
+  env \
+    HOME="$ui_home" \
+    HOD_HOME="$missing_home" \
+    HOD_BIN_DIR="$tmp_root/missing-ui-bin" \
+    HOD_CLAUDE_DIR="$tmp_root/missing-ui-claude" \
+    HOD_AGENTS_DIR="$tmp_root/missing-ui-agents" \
+    PATH="$fake_node_dir:$PATH" \
+    FAKE_NODE_ARGV="$argv_file" \
+    FAKE_NODE_VERSION=v20.0.0 \
+    FAKE_NODE_EXIT=0 \
+    "$missing_hod" ui "$@"
+}
+
+ui_missing_entry_log=$tmp_root/ui-missing-entry.log
+expect_rejection 'ui rejects a missing installed and fallback entry' \
+  run_missing_ui "$ui_missing_entry_log"
+expect_success 'ui does not launch when the entry is missing' \
+  test ! -e "$ui_missing_entry_log"
+
+# ---------------------------------------------------------------------------
 # summary
 # ---------------------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$pass" "$fail_count"
