@@ -275,6 +275,115 @@ report the real exit status — keep your own context for coordination.
 The controller should redirect an existing worker with new evidence rather than
 restart it or duplicate the original prompt.
 
+## Local HOD UI console
+
+The optional HOD web console is for observing and making the narrowly scoped
+settings changes described below. Launch it from the project you want to
+inspect:
+
+```bash
+hod ui [--project <path>] [--port <0-65535>] [--no-open]
+```
+
+It supports macOS and Linux and requires Node.js 20 or newer. `--project` must
+name an existing directory and defaults to the current working directory.
+`--port` accepts an integer from `0` through `65535`; the default `0` asks the
+OS to select a free port.
+
+By default, the launcher asks macOS `open` or Linux `xdg-open` to open the
+browser. `--no-open` prints a recovery URL instead, and the same URL is printed
+if the browser opener fails. The URL contains a one-time sensitive `#token`
+fragment. Use it only on the local machine; never share it, paste it into an
+issue or chat, or write it to logs. The browser exchanges the fragment for a
+local `HttpOnly; SameSite=Strict` cookie and clears the fragment from the
+address bar. The bootstrap token is single-use, so a reused or expired URL
+needs a fresh console launch.
+
+### Local-only boundary
+
+The server always binds `127.0.0.1`. It applies strict `Host` and `Origin`
+checks for the selected port and rejects forwarded-host headers. There is no
+remote or LAN mode. Static root validation failures and preload failures not
+covered by the supported per-asset cases below prevent the server from
+listening. During preload, supported per-asset symlink, oversized, and
+changed-file failures are captured for that asset; it remains unavailable while
+the rest of the valid asset set can still be served.
+
+### Runtime dashboard and reconnect behavior
+
+The Runtime view can show the `ALL` view plus multiple Herdr workspaces/spaces,
+their tabs, and their agents. Agent states are presented as idle, working,
+blocked, done, or unknown. Herdr being unavailable is nonfatal: the UI enters
+reconnecting state, clears the stale workspace/tab/agent snapshot and selected
+pane, then retries automatically. When Herdr returns, a fresh snapshot repopulates
+the dashboard.
+
+HOD obtains runtime state with bounded `session.snapshot` polling, normally
+about once per second. Reconnect delay backs off within bounded limits. The
+browser receives updates from the local console event stream, but the Herdr
+side is not an event-driven Herdr subscription; do not describe the dashboard
+as a guaranteed push or zero-latency view.
+
+### Transcript limits
+
+Transcript is only the currently selected pane. The server asks Herdr for that
+pane's held recent scrollback (`recent_unwrapped` text), keeps the selected
+result in RAM, and retains at most the newest 16 MiB of UTF-8 text. The view may
+show `gap`, `truncated`, or `reconnecting` markers when Herdr's read was already
+truncated, the console had to discard older text to meet its byte cap, or a
+reconnect interrupted continuity.
+
+This is a live bounded snapshot, not a transcript archive: it is not persistent,
+byte-exact, append-only, or an audit log. Do not use it as the sole record of
+agent activity or as evidence that omitted output never existed.
+
+### Settings view
+
+The Settings view shows HOD role profile status for exactly `controller`,
+`impl`, and `reviewer`. A missing role uses the confirmation
+`INSTALL HOD ROLE`. A role whose installed file differs requires `force` and
+the confirmation `OVERWRITE HOD ROLE`. A matching role is already `[OK]`; an
+unsafe destination is shown as disabled rather than overwritten.
+
+The Herdr configuration surface is an allowlist of exactly ten keys. The UI
+exposes typed metadata and controls only for these keys:
+
+| Key | Type and allowed values | Apply mode |
+| --- | --- | --- |
+| `theme.name` | string: built-in theme name | reload |
+| `theme.auto_switch` | boolean | reload |
+| `theme.light_name` | string: built-in theme name or `catppuccin-latte` | reload |
+| `theme.dark_name` | string: built-in theme name | reload |
+| `ui.agent_panel_sort` | string: `spaces`, `priority`, or `workspaces` | reload |
+| `ui.toast.delivery` | string: `off`, `herdr`, `terminal`, or `system` | reload |
+| `ui.toast.delay_seconds` | integer from `0` through `300` | reload |
+| `ui.sound.enabled` | boolean | reload |
+| `session.resume_agents_on_restore` | boolean | restart required |
+| `advanced.scrollback_limit_bytes` | integer from `262144` through `1073741824` bytes | restart required |
+
+The built-in theme names are `catppuccin`, `terminal`, `tokyo-night`,
+`dracula`, `nord`, `gruvbox`, `one-dark`, `solarized`, `kanagawa`, `rose-pine`,
+and `vesper`. Every change requires the exact `APPLY HERDR SETTING`
+confirmation. The writer creates a temporary candidate, runs `herdr config
+check`, atomically replaces the config, creates a backup when an existing
+config is replaced, and requests `herdr server reload-config`. The response
+marks the two restart-required settings; the UI does not silently restart
+Herdr. Unknown and secret config keys, raw invalid values, and credentials are
+never exposed through the console.
+
+### Config write safety and residual limit
+
+Symlinked config files and symlinked immediate config parents are rejected. The
+immediate config parent must be a directory owned by the current user and must
+not be group-writable or world-writable. The writer rechecks parent and target
+identity around validation and atomic rename, and rolls back when reload fails.
+
+There is an explicit same-user concurrent path-swap residual boundary. Node
+core does not provide the openat/renameat-style directory-FD anchoring needed
+to bind every later path operation to the originally checked parent. A same-user
+process can still swap a path after the final check, so this implementation
+must not be described as fully fail-closed against that race.
+
 ## Permission and blocker handling
 
 Workers may encounter prompts requiring credentials, destructive actions,

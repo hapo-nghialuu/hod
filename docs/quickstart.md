@@ -1,6 +1,6 @@
 # Quickstart
 
-Four levels. Each one works on its own; climb only when the previous level
+Five levels. Each one works on its own; climb only when the previous level
 feels limiting. You do not need policies, tiers, or worktrees to start — those
 words appear only at the level that needs them.
 
@@ -83,6 +83,30 @@ every deny rule.
 To have one orchestrator manage several projects at once, read
 [Portfolio orchestration](portfolio-orchestration.md) — this is where
 user-authored policy files and the two-tier contract come in, and not before.
+
+## Level 4 — Local HOD UI console
+
+For a local dashboard of Herdr workspaces, spaces, agents, and one selected
+pane's live scrollback:
+
+```bash
+hod ui [--project <path>] [--port <0-65535>] [--no-open]
+```
+
+Node.js 20+ is required on macOS or Linux. The default port is `0`; the command
+opens the browser with the platform opener, while `--no-open` prints the
+recovery URL. If opening fails, the URL is printed too. Its one-time `#token`
+fragment is sensitive: never share or log it. The browser exchanges it for a
+local HttpOnly/SameSite cookie and clears the fragment.
+
+The console is loopback-only at `127.0.0.1` with strict Host/Origin checks and
+no LAN mode. Herdr state is refreshed by bounded polling rather than an
+event-driven Herdr subscription; a Herdr outage is nonfatal, and reconnect
+clears stale dashboard state. Transcript is only the selected pane's RAM-only
+16 MiB UTF-8 tail and may be marked gap, truncated, or reconnecting. Settings
+cover the three HOD roles and exactly ten typed Herdr keys. See the full
+[local HOD UI console guide](usage-guide.md#local-hod-ui-console) for the
+settings matrix, write checks, and recovery details.
 
 ## Where to go next
 

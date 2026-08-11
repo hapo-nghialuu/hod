@@ -3,6 +3,90 @@
 Start with read-only evidence. Do not restart Herdr, update binaries, replace
 adapters, or kill pane processes merely to test a theory.
 
+## HOD UI console
+
+### Node version
+
+`hod ui` requires Node.js 20 or newer and supports macOS and Linux. Check the
+runtime used by the shell:
+
+```bash
+node --version
+```
+
+If it is below `v20`, install/select a supported Node version and run the
+command again. The UI does not have a remote or LAN mode; it always serves on
+`127.0.0.1`.
+
+### Browser did not open
+
+The default opener is `open` on macOS and `xdg-open` on Linux. Start with
+`--no-open` when you want the URL in the terminal:
+
+```bash
+hod ui --no-open
+```
+
+If the default opener fails, `hod ui` also prints the recovery URL. Use that
+URL only in a browser on the same machine. Its `#token` fragment is a one-time
+secret: never share it, put it in a ticket/chat, or write it to logs. The UI
+exchanges it for a local HttpOnly/SameSite cookie and clears the fragment.
+
+### 401, invalid, or expired one-time token
+
+The bootstrap token can be exchanged only once. A second tab, a copied/reused
+URL, a missing fragment, or an expired local session can produce `401` or a
+session-unavailable status. Close the unusable console process if needed and
+start a fresh one with `hod ui --no-open`; use the newly printed URL locally.
+Do not try to repair the token by editing or logging it.
+
+### Herdr disconnected or reconnecting
+
+Herdr being unavailable is nonfatal. The console marks the connection as
+reconnecting, clears stale workspace/agent/transcript state, and retries
+automatically. Wait for a fresh snapshot rather than treating the old pane
+list as current. If it does not recover, check Herdr without changing it:
+
+```bash
+herdr status --json | jq '{client, server}'
+```
+
+The HOD runtime uses bounded polling of Herdr snapshots, not a guaranteed
+event-driven Herdr subscription, so a small delay is expected.
+
+### Config parent permissions or symlink
+
+The console rejects a symlinked config file or immediate config parent. The
+immediate parent must be a directory owned by the current user and must not be
+group-writable or world-writable. Inspect the path selected by
+`HERDR_CONFIG_PATH`, or the default Herdr config location, without printing
+its contents:
+
+```bash
+config_file="${HERDR_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.toml}"
+printf 'HERDR_CONFIG_PATH=%s\n' "${HERDR_CONFIG_PATH:-<default>}"
+ls -ld "$config_file" "$(dirname "$config_file")"
+```
+
+Restore ownership and permissions through your normal system procedure, then
+restart only the UI process. Do not replace a symlink or overwrite a config
+until you have confirmed the intended target. The write path rechecks identity
+and uses atomic rename, but a same-user concurrent path swap remains possible
+because Node core lacks openat/renameat-style directory-FD anchoring; this is
+not a fully fail-closed guarantee.
+
+### Port conflict
+
+The default `--port 0` lets the OS choose a free port. If an explicit port is
+busy, either omit `--port` or choose another integer from `0` through `65535`:
+
+```bash
+hod ui --port 0
+```
+
+Keep the printed URL's `127.0.0.1:<port>` host unchanged; changing it to a LAN
+address is outside the supported security boundary.
+
 ## The skill does not activate
 
 Confirm the adapter exists:
