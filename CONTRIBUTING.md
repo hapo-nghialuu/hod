@@ -24,9 +24,10 @@ Run the repository-local validation entrypoints:
 `validate.sh` checks Bash syntax, required skill frontmatter (including the
 name format and the 1024-character description limit), and local Markdown
 targets without third-party Python packages. `test-hod.sh` runs the CLI's
-behavioral tests inside a disposable temporary workspace. Both run in
-CI (`.github/workflows/validate.yml`) on Ubuntu and macOS for every push and
-pull request.
+behavioral tests inside a disposable temporary workspace. The matching GitHub
+Actions workflow (`.github/workflows/validate.yml`) remains available for manual
+runs on Ubuntu and macOS; automatic push and pull-request runs are temporarily
+paused, so contributors must run both commands locally before proposing a change.
 
 For a release, also validate with the official Codex `skill-creator` validator
 when it is installed. The validator requires PyYAML; create an isolated
