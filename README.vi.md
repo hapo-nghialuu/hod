@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hapo-nghialuu/hod/actions/workflows/validate.yml"><img src="https://github.com/hapo-nghialuu/hod/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
+  <!-- Ẩn badge CI trong thời gian tạm dừng validation tự động. -->
   <a href="https://github.com/hapo-nghialuu/hod/releases"><img src="https://img.shields.io/github/v/release/hapo-nghialuu/hod" alt="release"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue" alt="platform">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
@@ -125,7 +125,7 @@ test thật, rồi quay lại với một câu trả lời — kèm danh sách n
 mới quyết được.
 
 <p align="center">
-  <img src="assets/hod-flow-vi.svg" alt="Bạn → controller → workers → bằng chứng quay về" width="880">
+  <img src="assets/hod-flow-vi.svg" alt="Bạn → adaptive controller → workers, reviewer và advisor tùy chọn → bằng chứng đã kiểm chứng quay về" width="880">
 </p>
 
 Bạn không phải quản worker. Không phải chạy theo từng pane. Bạn nhận bằng
@@ -380,7 +380,7 @@ herdr-orchestrator/
 ├── templates/                  # policy mẫu + profile quyền theo vai
 ├── docs/                       # tài liệu cho người
 ├── assets/                     # hình ảnh README
-└── .github/workflows/          # CI: chạy đủ test trên Ubuntu + macOS
+└── .github/workflows/          # Validation thủ công trên Ubuntu + macOS; tạm dừng auto-run
 ```
 
 ## Những gì nó KHÔNG làm

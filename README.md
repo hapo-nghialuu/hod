@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hapo-nghialuu/hod/actions/workflows/validate.yml"><img src="https://github.com/hapo-nghialuu/hod/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
+  <!-- CI badge hidden while automatic validation is paused. -->
   <a href="https://github.com/hapo-nghialuu/hod/releases"><img src="https://img.shields.io/github/v/release/hapo-nghialuu/hod" alt="release"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue" alt="platform">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
@@ -134,7 +134,7 @@ panes, checks their output against real diffs and real test runs, and comes
 back with one answer — plus a list of anything only you can decide.
 
 <p align="center">
-  <img src="assets/hod-flow-en.svg" alt="You → controller → workers → verified evidence back" width="880">
+  <img src="assets/hod-flow-en.svg" alt="You → adaptive controller → workers, reviewer, and optional advisor → verified evidence back" width="880">
 </p>
 
 You never manage the workers. You never chase a pane. You get evidence, not
@@ -397,7 +397,7 @@ herdr-orchestrator/
 ├── templates/                  # policy template + role permission profiles
 ├── docs/                       # human guides
 ├── assets/                     # README artwork
-└── .github/workflows/          # CI: all test entrypoints on Ubuntu + macOS
+└── .github/workflows/          # Manual validation on Ubuntu + macOS; auto-run paused
 ```
 
 ## What it does not do
