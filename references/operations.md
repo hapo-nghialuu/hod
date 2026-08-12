@@ -310,9 +310,10 @@ Herdr 0.8 help can render options before `PANE_ID`; follow the installed
 parser and place the pane ID immediately after `report-metadata` as shown.
 This recipe correction does not change the public `hod` CLI.
 
-When supported, use one finite TTL for the run and only the five approved
-token names. The helper below is a recipe for the controller's existing shell
-flow; it must not become new logic in the `hod` CLI:
+When supported, use a finite 24-hour TTL (`86400000` ms) for the run and only
+the five approved token names. The helper below is a recipe for the
+controller's existing shell flow; it must not become new logic in the `hod`
+CLI:
 
 ```bash
 report_hod_topology() {
@@ -325,7 +326,7 @@ report_hod_topology() {
   local report_args=(
     herdr pane report-metadata "$pane_id"
     --source hod
-    --ttl-ms 3600000
+    --ttl-ms 86400000
     --token "hod_role=$role"
     --token "hod_task=$task_label"
     --token "hod_run=$run_id"
@@ -361,9 +362,10 @@ Run the helper at the existing lifecycle points: controller pre-dispatch;
 immediately after split and before start; after a successful start; after a
 redirect has resolved and delivered the target prompt; and during harvest,
 after the target settles and before evidence is read. Redirect and harvest
-reuse the same real parent, role, relation, and run; they only refresh the
-finite TTL and, when needed, the short task label. If a report fails, retain
-the failure as a UI-topology warning and continue the underlying lifecycle.
+reuse the same real parent, role, relation, and run; they only restart the
+24-hour TTL and, when needed, refresh the short task label. If a report fails,
+retain the failure as a UI-topology warning and continue the underlying
+lifecycle.
 
 ## Start a worker
 

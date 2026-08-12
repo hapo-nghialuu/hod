@@ -53,7 +53,9 @@ topology may be missing` and continue the main orchestration unchanged. A
 metadata error never blocks split, start, prompt, redirect, wait, or harvest.
 
 For supported Herdr, report the controller pane and every child pane with
-`--source hod` and a finite TTL (the reference recipe uses `3600000` ms):
+`--source hod` and a finite 24-hour TTL (`86400000` ms). This keeps topology
+visible for long-running agents while remaining within Herdr 0.8's finite-TTL
+limit:
 
 Herdr 0.8 help can render options before `PANE_ID`; follow the installed
 parser and place the pane ID immediately after `report-metadata` as shown.
@@ -63,7 +65,7 @@ This recipe correction does not change the public `hod` CLI.
 metadata_args=(
   herdr pane report-metadata "$pane_id"
   --source hod
-  --ttl-ms 3600000
+  --ttl-ms 86400000
   --token "hod_role=$role"
   --token "hod_task=$task_label"
   --token "hod_run=$run_id"
@@ -103,8 +105,9 @@ before dispatch; after `pane split`, parse and report the returned child pane
 ID before `agent start`; report that same pane again after a successful start;
 on redirect, resolve the target's actual pane ID and refresh its same parent,
 role, relation, run, and new short task label; on harvest, refresh the settled
-pane using its actual ID before reading evidence. Do not reparent a pane on a
-redirect or harvest, and let the finite TTL expire naturally.
+pane using its actual ID before reading evidence. Each report restarts the
+24-hour TTL. Do not reparent a pane on a redirect or harvest, and let the
+finite TTL expire naturally.
 
 ## Workflow
 

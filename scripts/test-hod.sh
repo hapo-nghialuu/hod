@@ -134,8 +134,12 @@ if token_names != allowed_tokens:
 if "herdr pane report-metadata" not in text or "--source hod" not in text:
     raise SystemExit("report-metadata source contract is missing")
 ttl_values = re.findall(r"--ttl-ms\s+([0-9]+)", text)
-if not ttl_values or any(int(value) <= 0 for value in ttl_values):
-    raise SystemExit("metadata TTL is missing or not a positive finite integer")
+expected_ttl = 86400000
+if not ttl_values or any(int(value) != expected_ttl for value in ttl_values):
+    raise SystemExit(
+        f"metadata TTL must remain the finite 24-hour value {expected_ttl}: "
+        f"{ttl_values}"
+    )
 
 if "topology_metadata_supported=true" not in text:
     raise SystemExit("supported metadata capability path is missing")
@@ -153,6 +157,14 @@ for args_name in ("metadata_args", "report_args"):
     command_lines = [
         line.strip() for line in recipe.group("body").splitlines() if line.strip()
     ]
+    recipe_ttl_lines = [
+        line for line in command_lines if line.startswith("--ttl-ms")
+    ]
+    if recipe_ttl_lines != [f"--ttl-ms {expected_ttl}"]:
+        raise SystemExit(
+            f"{args_name} must contain exactly one finite 24-hour TTL: "
+            f"{recipe_ttl_lines}"
+        )
     if command_lines[:2] != [
         'herdr pane report-metadata "$pane_id"',
         "--source hod",
