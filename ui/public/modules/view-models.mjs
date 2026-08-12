@@ -1,6 +1,7 @@
 export const STATUS_PRIORITY = Object.freeze({ blocked: 0, working: 1, idle: 2, done: 3, unknown: 4 });
 const STATUS_META = Object.freeze({ blocked: { text: 'blocked', tag: '[ERR]' }, working: { text: 'working', tag: '[WORK]' }, idle: { text: 'idle', tag: '[WAIT]' }, done: { text: 'done', tag: '[DONE]' }, unknown: { text: 'unknown', tag: '[UNKNOWN]' } });
 const COUNTED_STATUSES = Object.freeze(['working', 'blocked', 'idle', 'done']);
+const AGENT_KIND_LABELS = Object.freeze({ claude: 'CLAUDE CODE', codex: 'CODEX', grok: 'GROK' });
 
 function listFrom(input) {
   if (Array.isArray(input)) return input;
@@ -37,6 +38,7 @@ function workspaceOf(agent) {
 
 function agentName(agent) { return String(agent?.name ?? agent?.display ?? agent?.display_agent ?? agent?.title ?? agent?.label ?? agent?.id ?? 'agent'); }
 function agentId(agent) { return agent?.paneId ?? agent?.pane_id ?? agent?.id ?? null; }
+function agentKind(agent) { const value = agent?.agentKind ?? agent?.agent_kind; return typeof value === 'string' ? AGENT_KIND_LABELS[value.trim().toLowerCase()] ?? 'UNKNOWN' : 'UNKNOWN'; }
 
 export function filterAgents(input, selectedWorkspace = null) {
   const agents = listFrom(input);
@@ -56,7 +58,7 @@ export function sortAgents(input) {
 
 export function agentViewModel(agent) {
   const status = normalizeStatus(agent); const id = agentId(agent);
-  return { ...agent, id: id == null ? null : String(id), displayName: agentName(agent), workspaceId: workspaceOf(agent), status, statusText: STATUS_META[status].text, statusTag: STATUS_META[status].tag, statusPriority: STATUS_PRIORITY[status] };
+  return { ...agent, id: id == null ? null : String(id), displayName: agentName(agent), agentKind: agentKind(agent), workspaceId: workspaceOf(agent), status, statusText: STATUS_META[status].text, statusTag: STATUS_META[status].tag, statusPriority: STATUS_PRIORITY[status] };
 }
 
 export function buildAgentViewModels(input, selectedWorkspace = null) { return sortAgents(filterAgents(input, selectedWorkspace)).map(agentViewModel); }

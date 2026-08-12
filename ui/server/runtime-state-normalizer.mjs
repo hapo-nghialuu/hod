@@ -137,12 +137,14 @@ export function normalizeSnapshot(input, connection) {
     if (!workspaceIds.has(workspaceId) || !tab || tab.workspaceId !== workspaceId) invalid();
     const title = field(item, 'title') ?? field(item, 'terminal_title_stripped') ?? field(item, 'terminal_title');
     const display = field(item, 'display_agent', 'display');
+    const agentKind = field(item, 'agent', 'agentKind');
     return {
       paneId: id(field(item, 'pane_id', 'paneId')),
       workspaceId,
       tabId,
-      name: optionalText(field(item, 'name') ?? display ?? field(item, 'agent')),
+      name: optionalText(field(item, 'name') ?? display ?? agentKind),
       display: optionalText(display),
+      agentKind: optionalText(agentKind),
       status: state(field(item, 'agent_status', 'status')),
       title: optionalText(title),
       focused: boolean(field(item, 'focused')),

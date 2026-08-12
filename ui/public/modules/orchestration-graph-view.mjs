@@ -83,7 +83,7 @@ function edgeLayer(documentRef, model, mobile) {
   ]);
 }
 function nodeButton(documentRef, node, selected) {
-  const roleLabel = ROLE_LABELS[node.role] ?? ROLE_LABELS.unmapped; const label = `${node.displayName}, ${roleLabel}, ${node.statusText}`;
+  const roleLabel = ROLE_LABELS[node.role] ?? ROLE_LABELS.unmapped; const label = `${node.displayName}, ${roleLabel}, ${node.agentKind}, ${node.statusText}`;
   const selectable = node.id !== null;
   const classes = ['graph-node', `graph-node-${node.role}`, node.mapped ? '' : 'is-unmapped',
     node.disconnected ? 'is-disconnected' : '', node.status === 'working' ? 'is-working' : '',
@@ -94,14 +94,15 @@ function nodeButton(documentRef, node, selected) {
     'data-pane-id': selectable ? node.id : null,
     'data-node-state': node.disconnected ? 'disconnected' : node.status,
     'data-agent-status': node.status,
+    'data-agent-kind': node.agentKind,
     'aria-pressed': selected ? 'true' : 'false',
     'aria-label': selectable ? `Select read-only transcript for ${label}` : `${label}, no pane id`,
-    title: `${roleLabel} · ${node.task} · run ${node.runId ?? '—'}`,
+    title: `${roleLabel} · ${node.agentKind} · ${node.task} · run ${node.runId ?? '—'}`,
     disabled: !selectable,
   }, [
     createAgentAvatarGlyph(documentRef),
     createElement('span', { class: 'graph-node-copy' }, [
-      createElement('span', { class: 'graph-node-role' }, [`[${roleLabel}]`], documentRef), createElement('strong', { class: 'graph-node-name' }, [node.displayName], documentRef),
+      createElement('span', { class: 'graph-node-role' }, [`[${roleLabel}] [${node.agentKind}]`], documentRef), createElement('strong', { class: 'graph-node-name' }, [node.displayName], documentRef),
       createElement('span', { class: 'graph-node-status' }, [`${node.statusTag} ${node.statusText}`], documentRef),
       createElement('span', { class: 'graph-node-meta' }, [node.task], documentRef),
     ], documentRef),

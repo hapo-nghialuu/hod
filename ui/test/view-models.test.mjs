@@ -39,6 +39,7 @@ test('view models include text status tags independent of color', () => {
   assert.equal(statusTag({ status: 'failed' }), '[ERR]');
   assert.equal(models[0].statusText, 'blocked');
   assert.equal(buildAgentViewModels([{ paneId: 'named', name: 'Zed', display: 'Claude' }])[0].displayName, 'Zed');
+  assert.deepEqual(buildAgentViewModels([{ agentKind: 'codex' }, { agentKind: 'claude' }, { agentKind: 'grok' }, { name: 'claude-looking' }]).map(({ agentKind }) => agentKind), ['CODEX', 'CLAUDE CODE', 'GROK', 'UNKNOWN']);
 });
 
 test('same-status agents sort by display name and preserve duplicate-name order', () => {

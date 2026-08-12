@@ -12,6 +12,7 @@ function agent(id, role, options = {}) {
     paneId: id,
     workspaceId: 'space',
     display: id,
+    agentKind: options.agentKind ?? null,
     status: options.status ?? 'idle',
     orchestration: {
       role,
@@ -148,15 +149,17 @@ test('missing, self, and cross-run parents stay disconnected without inferred ed
 test('CSP-safe SVG canvases keep unmapped nodes distinct without inline styles', () => {
   const root = new FakeNode('div', fakeDocument);
   const model = renderOrchestrationGraph(fakeDocument, root, { runtime: { agents: [
-    agent('controller', 'controller'),
-    agent('worker', 'worker', { status: 'working' }),
+      agent('controller', 'controller', { agentKind: 'claude' }),
+      agent('worker', 'worker', { status: 'working', agentKind: 'codex' }),
     { paneId: 'orphan-a', display: 'orphan-a', status: 'idle', orchestration: null },
     { paneId: 'orphan-b', display: 'orphan-b', status: 'idle', orchestration: null },
   ] } });
   const rendered = [root, ...descendants(root)];
   assert.equal(rendered.some((node) => Object.hasOwn(node.attrs, 'style')), false);
   assert.equal(model.edges.length, 1);
-  assert.match(visibleText(root), /\[COORDINATOR\]/);
+  assert.match(visibleText(root), /\[COORDINATOR\] \[CLAUDE CODE\]/);
+  assert.match(visibleText(root), /\[WORKER\] \[CODEX\]/);
+  assert.match(visibleText(root), /\[UNMAPPED\] \[UNKNOWN\]/);
   const avatars = rendered.filter((node) => node.name === 'svg' && node.attrs.class === 'graph-agent-avatar');
   assert.equal(avatars.length, 8);
   assert.ok(avatars.every((node) => node.attrs.viewBox === '0 0 48 48' && node.attrs['aria-hidden'] === 'true'));
