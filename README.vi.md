@@ -234,6 +234,16 @@ quản lý pane:
 hod ui [--project <path>] [--port <0-65535>] [--no-open]
 ```
 
+Muốn xem observer runtime-only, không phụ thuộc thư mục hiện tại, dùng:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` bị từ chối; observer bỏ qua thư mục hiện tại và
+không đọc project/config settings. `hod ui` và `hod ui --project` vẫn giữ
+nguyên hành vi project-scoped hiện có.
+
 UI hỗ trợ macOS và Linux, cần Node.js 20 trở lên. Port mặc định là `0` để hệ
 điều hành tự chọn port trống; macOS dùng `open`, Linux dùng `xdg-open`. Với
 `--no-open`, hoặc khi lệnh mở trình duyệt thất bại, `hod ui` in recovery URL.
@@ -243,9 +253,13 @@ browser đổi nó thành cookie cục bộ `HttpOnly; SameSite=Strict` rồi x�
 Console chỉ local (`127.0.0.1`, kiểm tra chặt `Host`/`Origin`, không có remote/LAN).
 Runtime theo dõi nhiều workspace/space và agent bằng polling có giới hạn, không
 phải subscription Herdr event-driven; Herdr lỗi là nonfatal và reconnect xóa
-state stale. Transcript chỉ là tail 16 MiB UTF-8 trong RAM của pane đang chọn,
-không persistent, byte-exact, append-only hay audit log. Settings bao phủ ba
-role HOD và đúng mười key Herdr có kiểu; key lạ/bí mật không lộ ra.
+state stale. Dashboard tính tổng toàn bộ space cho spaces, agents, working,
+blocked, idle và done, không phụ thuộc space đang chọn. Transcript chỉ là tail
+16 MiB UTF-8 trong RAM của pane đang chọn, chỉ đọc, không persistent,
+byte-exact, append-only hay audit log. Với `hod start`, capability runtime-only
+ẩn Settings và không dùng endpoint settings hay hành động control/mutation.
+`hod ui` legacy vẫn giữ Settings cho ba role HOD và đúng mười key Herdr có kiểu;
+key lạ/bí mật không lộ ra.
 
 Ma trận setting, confirmation/force, giới hạn ghi và residual boundary khi cùng
 user swap path được mô tả đầy đủ ở [Console UI HOD cục bộ](docs/usage-guide.md#local-hod-ui-console).

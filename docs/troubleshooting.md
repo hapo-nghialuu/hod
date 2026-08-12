@@ -5,6 +5,21 @@ adapters, or kill pane processes merely to test a theory.
 
 ## HOD UI console
 
+### Global observer options
+
+Run the runtime-only observer from any directory with:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` is intentionally rejected. Use `hod ui` or
+`hod ui --project <path>` for the unchanged legacy/project-scoped console.
+The observer is runtime-only: its read-only transcript and all-space counts
+(spaces, agents, working, blocked, idle, done) do not use project/config data.
+Its runtime capabilities hide Settings and disable settings, control, and
+mutation actions.
+
 ### Node version
 
 `hod ui` requires Node.js 20 or newer and supports macOS and Linux. Check the
@@ -53,6 +68,10 @@ herdr status --json | jq '{client, server}'
 
 The HOD runtime uses bounded polling of Herdr snapshots, not a guaranteed
 event-driven Herdr subscription, so a small delay is expected.
+
+If the Settings navigation is absent while using `hod start`, that is expected:
+the observer receives `settings: false` and never calls `/api/settings`. A
+legacy `hod ui` snapshot with missing capability fields defaults them to enabled.
 
 ### Config parent permissions or symlink
 

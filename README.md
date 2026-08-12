@@ -246,6 +246,16 @@ agents without managing panes by hand:
 hod ui [--project <path>] [--port <0-65535>] [--no-open]
 ```
 
+For the directory-independent, runtime-only observer, use:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` is rejected; the observer ignores the current
+directory and never reads project/config settings. `hod ui` and
+`hod ui --project` keep their existing project-scoped behavior unchanged.
+
 It supports macOS and Linux and requires Node.js 20 or newer. The default port
 is `0` (an OS-selected free port), and the default browser opener is `open` on
 macOS or `xdg-open` on Linux. `--no-open`, or a failed opener, prints a recovery
@@ -256,10 +266,14 @@ clears the fragment.
 The console is local-only (`127.0.0.1` with strict `Host`/`Origin` checks and no
 remote/LAN mode). Its Runtime view tracks multiple Herdr workspaces/spaces and
 agents using bounded polling, not event-driven Herdr subscriptions; Herdr
-outages are nonfatal and reconnect clears stale state. Transcript output is
-only the selected pane's RAM-only, capped 16 MiB UTF-8 tail, not persistent,
-byte-exact, append-only, or an audit log. Settings cover the three HOD roles
-and exactly ten typed Herdr keys; unknown and secret keys stay hidden.
+outages are nonfatal and reconnect clears stale state. The dashboard reports
+all-space totals for spaces, agents, working, blocked, idle, and done, regardless
+of the selected space. Transcript output is only the selected pane's RAM-only,
+capped 16 MiB UTF-8 tail, read-only and not persistent, byte-exact, append-only,
+or an audit log. In `hod start`, runtime-only capabilities disable and hide
+Settings, and no settings endpoint or control/mutation action is used. Legacy
+`hod ui` keeps its Settings view for the documented three HOD roles and exactly
+ten typed Herdr keys; unknown and secret keys stay hidden.
 
 The complete console behavior, settings matrix, write checks, and residual
 same-user path-swap limitation are documented in [Local HOD UI console](docs/usage-guide.md#local-hod-ui-console).

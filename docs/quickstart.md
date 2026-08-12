@@ -102,11 +102,23 @@ local HttpOnly/SameSite cookie and clears the fragment.
 The console is loopback-only at `127.0.0.1` with strict Host/Origin checks and
 no LAN mode. Herdr state is refreshed by bounded polling rather than an
 event-driven Herdr subscription; a Herdr outage is nonfatal, and reconnect
-clears stale dashboard state. Transcript is only the selected pane's RAM-only
-16 MiB UTF-8 tail and may be marked gap, truncated, or reconnecting. Settings
-cover the three HOD roles and exactly ten typed Herdr keys. See the full
+clears stale dashboard state. It shows all-space totals for spaces, agents,
+working, blocked, idle, and done. Transcript is only the selected pane's
+read-only, RAM-only 16 MiB UTF-8 tail and may be marked gap, truncated, or
+reconnecting. Settings cover the three HOD roles and exactly ten typed Herdr
+keys. See the full
 [local HOD UI console guide](usage-guide.md#local-hod-ui-console) for the
 settings matrix, write checks, and recovery details.
+
+For the global runtime-only view from any directory:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` is rejected. Runtime-only mode hides Settings and
+does not call settings APIs or expose control/mutation actions. The existing
+`hod ui` and `hod ui --project` commands are unchanged.
 
 ## Where to go next
 

@@ -299,6 +299,19 @@ local `HttpOnly; SameSite=Strict` cookie and clears the fragment from the
 address bar. The bootstrap token is single-use, so a reused or expired URL
 needs a fresh console launch.
 
+### Global runtime-only observer
+
+Use the directory-independent observer from any working directory:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` is rejected. `hod start` is foreground,
+loopback-only, and runtime-only: it does not resolve or read project/config
+settings, start Herdr agents, or expose mutation/control actions. The existing
+`hod ui` and `hod ui --project` commands remain unchanged.
+
 ### Local-only boundary
 
 The server always binds `127.0.0.1`. It applies strict `Host` and `Origin`
@@ -312,7 +325,9 @@ the rest of the valid asset set can still be served.
 ### Runtime dashboard and reconnect behavior
 
 The Runtime view can show the `ALL` view plus multiple Herdr workspaces/spaces,
-their tabs, and their agents. Agent states are presented as idle, working,
+their tabs, and their agents. It exposes all-space totals for spaces, agents,
+working, blocked, idle, and done; selecting a space only changes browsing and
+does not change those totals. Agent states are presented as idle, working,
 blocked, done, or unknown. Herdr being unavailable is nonfatal: the UI enters
 reconnecting state, clears the stale workspace/tab/agent snapshot and selected
 pane, then retries automatically. When Herdr returns, a fresh snapshot repopulates
@@ -333,14 +348,18 @@ show `gap`, `truncated`, or `reconnecting` markers when Herdr's read was already
 truncated, the console had to discard older text to meet its byte cap, or a
 reconnect interrupted continuity.
 
-This is a live bounded snapshot, not a transcript archive: it is not persistent,
+This is a live bounded, read-only snapshot, not a transcript archive: it is not persistent,
 byte-exact, append-only, or an audit log. Do not use it as the sole record of
 agent activity or as evidence that omitted output never existed.
 
 ### Settings view
 
-The Settings view shows HOD role profile status for exactly `controller`,
-`impl`, and `reviewer`. A missing role uses the confirmation
+The Settings view is available in the legacy `hod ui` path. In runtime-only
+`hod start`, the state capabilities set `settings`, `control`, and `mutation`
+to false: Settings is hidden and unreachable, the settings API is not called,
+and no save/control action is exposed. The Settings view otherwise shows HOD
+role profile status for exactly `controller`, `impl`, and `reviewer`. A missing
+role uses the confirmation
 `INSTALL HOD ROLE`. A role whose installed file differs requires `force` and
 the confirmation `OVERWRITE HOD ROLE`. A matching role is already `[OK]`; an
 unsafe destination is shown as disabled rather than overwritten.

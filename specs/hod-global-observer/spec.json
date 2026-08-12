@@ -1,0 +1,167 @@
+{
+  "feature_name": "hod-global-observer",
+  "created_at": "2026-08-11T23:14:08+07:00",
+  "updated_at": "2026-08-12T02:03:26+07:00",
+  "language": "en",
+  "status": "in_progress",
+  "phase": "implementation",
+  "current_phase": "implementation",
+  "priority": "P0",
+  "effort": "3–5 implementation days",
+  "tags": ["hod", "global-observer", "runtime-only", "loopback"],
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "scope_lock": {
+    "source": "User-approved runtime-only global Herdr observer via hod start",
+    "in_scope": [
+      "hod start from any directory",
+      "Foreground loopback runtime-only observation of all Herdr workspaces, tabs, panes, agents, and selected transcript",
+      "Herdr 0.8 one-request-per-connection snapshots",
+      "Capability-aware UI with all-space counts for spaces, agents, working, blocked, idle, and done",
+      "Backward compatibility for hod ui and hod ui --project",
+      "Preservation of Session Host Origin security and Claude-orange terminal UI"
+    ],
+    "out_of_scope": [
+      "Project/config path resolution or project/config reads and writes",
+      "Settings UI, settings APIs, and global settings",
+      "Daemon PID, Herdr lifecycle control, LAN exposure, agent control, auto-install, and auto-update"
+    ],
+    "expansion_policy": "requires-user-approval"
+  },
+  "dependencies": {
+    "blockedBy": [],
+    "blocks": ["tasks/task-R1-01-runtime-observer-ui.md"]
+  },
+  "task_files": [
+    "tasks/task-R0-01-runtime-only-entrypoint.md",
+    "tasks/task-R1-01-runtime-observer-ui.md"
+  ],
+  "file_scope": {
+    "R0-01": {
+      "modify": [
+        "bin/hod",
+        "ui/server.mjs",
+        "ui/server/runtime-options.mjs",
+        "scripts/test-hod.sh",
+        "ui/test/server-entrypoint.test.mjs",
+        "ui/test/runtime-options.test.mjs",
+        "ui/test/runtime-client-connections.test.mjs"
+      ],
+      "create": [
+        "ui/server/global-observer-runtime.mjs",
+        "ui/server/global-observer-api-controller.mjs",
+        "ui/test/global-observer-runtime.test.mjs",
+        "ui/test/global-observer-api-controller.test.mjs"
+      ],
+      "protected_unchanged": [
+        "ui/server/application-paths.mjs",
+        "ui/server/live-console-runtime.mjs",
+        "ui/server/api-controller.mjs",
+        "ui/server/runtime-events.mjs"
+      ]
+    },
+    "R1-01": {
+      "modify": [
+        "ui/public/index.html",
+        "ui/public/modules/console-view.mjs",
+        "ui/public/modules/dashboard-view.mjs",
+        "ui/public/modules/ui-store.mjs",
+        "ui/public/modules/view-models.mjs",
+        "ui/public/modules/runtime-sync.mjs",
+        "ui/test/frontend-render-security.test.mjs",
+        "ui/test/runtime-sync.test.mjs",
+        "ui/test/ui-store.test.mjs",
+        "ui/test/view-models.test.mjs",
+        "README.md",
+        "README.vi.md",
+        "docs/usage-guide.md",
+        "docs/getting-started.md",
+        "docs/quickstart.md",
+        "docs/troubleshooting.md"
+      ],
+      "create": [],
+      "create_policy": "Only a focused frontend module or test may be created if needed to keep the existing 200-line limit."
+    }
+  },
+  "task_registry": {
+    "tasks/task-R0-01-runtime-only-entrypoint.md": {
+      "id": "R0-01",
+      "title": "Runtime-only entrypoint and boundaries",
+      "status": "done",
+      "dependencies": [],
+      "validation_required": false,
+      "blocker": null,
+      "started_at": null,
+      "completed_at": "2026-08-12T00:16:28+07:00",
+      "last_updated_at": "2026-08-12T00:53:23+07:00"
+    },
+    "tasks/task-R1-01-runtime-observer-ui.md": {
+      "id": "R1-01",
+      "title": "Capability-aware global observer UI",
+      "status": "done",
+      "dependencies": ["tasks/task-R0-01-runtime-only-entrypoint.md"],
+      "validation_required": false,
+      "blocker": null,
+      "started_at": null,
+      "completed_at": "2026-08-12T02:03:26+07:00",
+      "last_updated_at": "2026-08-12T02:03:26+07:00"
+    }
+  },
+  "blocker": null,
+  "progress": {
+    "init": "done",
+    "requirements": "done",
+    "research": "done",
+    "design": "done",
+    "tasks": "done",
+    "code": "done",
+    "test": "done",
+    "review": "done"
+  },
+  "timestamps": {
+    "init": "2026-08-11T23:14:08+07:00",
+    "requirements_done": "2026-08-11T23:15:08+07:00",
+    "research_done": "2026-08-11T23:16:08+07:00",
+    "design_done": "2026-08-11T23:17:08+07:00",
+    "tasks_done": "2026-08-11T23:18:08+07:00",
+    "code_done": "2026-08-12T02:03:26+07:00",
+    "test_done": "2026-08-12T02:03:26+07:00",
+    "review_done": "2026-08-12T02:03:26+07:00",
+    "validation_done": "2026-08-12T02:03:26+07:00"
+  },
+  "design_context": {
+    "discovery_mode": "source-grounded",
+    "discovery_reason": "The repository uses bin/hod Bash and zero-dependency Node .mjs paths; implementation scope is grounded to existing files and the user-approved observer boundaries.",
+    "execution_tier": "standard",
+    "validation_recommended": true
+  },
+  "validation": {
+    "status": "completed",
+    "required": true,
+    "reason": "Mandatory spec-output and spec-ground validators passed after repository path and contract correction.",
+    "session_count": 1,
+    "questions_asked": 0,
+    "last_validated_at": "2026-08-12T00:53:23+07:00"
+  },
+  "translation": {
+    "enabled": false,
+    "language": null,
+    "language_code": null,
+    "dir": null,
+    "sync": "always",
+    "last_synced_at": null
+  },
+  "ready_for_implementation": true
+}
