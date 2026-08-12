@@ -44,6 +44,8 @@ function integer(value) {
   return value;
 }
 
+function optionalInteger(value) { return value === undefined || value === null ? null : integer(value); }
+
 function state(value) {
   if (!AGENT_STATUSES.includes(value)) invalid();
   return value;
@@ -145,6 +147,7 @@ export function normalizeSnapshot(input, connection) {
       title: optionalText(title),
       focused: boolean(field(item, 'focused')),
       revision: integer(field(item, 'revision')),
+      stateChangeSeq: optionalInteger(field(item, 'state_change_seq', 'stateChangeSeq')),
       orchestration: normalizeOrchestrationMetadata(item.tokens),
       _workspaceOrder: workspaceOrder.get(workspaceId),
       _tabNumber: tab.number,

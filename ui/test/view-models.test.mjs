@@ -61,13 +61,18 @@ test('progress and occupancy helpers clamp invalid and out-of-range values', () 
   assert.equal(asciiProgress(5, 10, 100).length, asciiProgress(5, 10, 80).length);
 });
 
-test('spaces include ALL, preserve natural workspace order, counts, and aggregate status', () => {
+test('spaces keep ALL first, then urgent, active, and recently changed workspaces', () => {
   const spaces = buildSpaceViewModels({ workspaces: [
-    { id: 'space10', number: 10, label: 'Ten', paneCount: 2, tabCount: 1, status: 'working' },
-    { id: 'space2', number: 2, label: 'Two', paneCount: 3, tabCount: 2, status: 'blocked' },
+    { id: 'idle', number: 1, paneCount: 1, tabCount: 1, status: 'idle' },
+    { id: 'working-old', number: 2, paneCount: 2, tabCount: 1, status: 'working' },
+    { id: 'blocked', number: 3, paneCount: 3, tabCount: 2, status: 'blocked' },
+    { id: 'working-new', number: 4, paneCount: 1, tabCount: 1, status: 'working' },
+  ], agents: [
+    { workspaceId: 'idle', stateChangeSeq: 90 }, { workspaceId: 'working-old', stateChangeSeq: 20 },
+    { workspaceId: 'blocked', stateChangeSeq: 10 }, { workspaceId: 'working-new', stateChangeSeq: 80 },
   ] });
-  assert.deepEqual(spaces.map((space) => space.id), [null, 'space2', 'space10']);
-  assert.deepEqual([spaces[0].paneCount, spaces[0].tabCount], [5, 3]);
+  assert.deepEqual(spaces.map((space) => space.id), [null, 'blocked', 'working-new', 'working-old', 'idle']);
+  assert.deepEqual([spaces[0].paneCount, spaces[0].tabCount], [7, 5]);
   assert.equal(spaces[0].statusTag, '[ERR]');
   assert.equal(spaces[1].statusText, 'blocked');
 });

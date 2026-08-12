@@ -9,7 +9,7 @@ const connection = { state: 'connected', version: '0.8.0', protocol: 19, errorCo
 function snapshot({ includeSecondPane = true } = {}) {
   const agents = [{
     pane_id: 'p-z', workspace_id: 'w-z', tab_id: 't-z', name: 'Zed', display_agent: 'Claude',
-    agent_status: 'working', title: 'z title', focused: true, revision: 9,
+    agent_status: 'working', title: 'z title', focused: true, revision: 9, state_change_seq: 42,
     cwd: '/private/secret', foreground_cwd: '/private/secret', agent_session: { value: 'secret' },
     tokens: { secret: 'do-not-copy' }, terminal_id: 'tty-secret', worktree: '/private/worktree',
   }];
@@ -41,7 +41,7 @@ test('normalization sorts and exposes only the public redacted shape', () => {
   assert.deepEqual(normalized.agents.map(({ paneId }) => paneId), ['p-z', 'p-a']);
   assert.deepEqual(normalized.agents[0], {
     paneId: 'p-z', workspaceId: 'w-z', tabId: 't-z', name: 'Zed', display: 'Claude',
-    status: 'working', title: 'z title', focused: true, revision: 9, orchestration: null,
+    status: 'working', title: 'z title', focused: true, revision: 9, stateChangeSeq: 42, orchestration: null,
   });
   for (const forbidden of ['cwd', 'foreground_cwd', 'agent_session', 'tokens', 'terminal_id', 'worktree']) {
     assert.equal(JSON.stringify(normalized).includes(forbidden), false, forbidden);

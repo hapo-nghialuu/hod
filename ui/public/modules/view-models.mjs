@@ -140,9 +140,20 @@ function workspaceList(input) {
 }
 
 function spaceStatus(workspaces) { return workspaces.reduce((current, workspace) => { const status = normalizeStatus(workspace); return STATUS_PRIORITY[status] < STATUS_PRIORITY[current] ? status : current; }, 'unknown'); }
+function recentActivityByWorkspace(input) {
+  const latest = new Map();
+  for (const agent of listFrom(input)) {
+    const workspaceId = workspaceOf(agent);
+    const sequence = agent?.stateChangeSeq ?? agent?.state_change_seq;
+    if (workspaceId === null || !Number.isSafeInteger(sequence) || sequence < 0) continue;
+    latest.set(workspaceId, Math.max(sequence, latest.get(workspaceId) ?? -1));
+  }
+  return latest;
+}
 
 export function buildSpaceViewModels(input) {
-  const workspaces = workspaceList(input).map((workspace, index) => ({ workspace, index })).sort((left, right) => {
+  const recentActivity = recentActivityByWorkspace(input);
+  const naturalWorkspaces = workspaceList(input).map((workspace, index) => ({ workspace, index })).sort((left, right) => {
     const leftNumber = Number(left.workspace?.number); const rightNumber = Number(right.workspace?.number);
     const leftHasNumber = Number.isFinite(leftNumber); const rightHasNumber = Number.isFinite(rightNumber);
     if (leftHasNumber && rightHasNumber && leftNumber !== rightNumber) return leftNumber - rightNumber;
@@ -157,6 +168,12 @@ export function buildSpaceViewModels(input) {
     const status = normalizeStatus(workspace);
     return { ...workspace, id: id == null ? null : String(id), label: String(workspace?.label ?? id ?? 'workspace'), number: Number.isFinite(Number(workspace?.number)) ? Number(workspace.number) : null, paneCount: Number.isFinite(Number(paneCount)) ? Number(paneCount) : 0, tabCount: Number.isFinite(Number(tabCount)) ? Number(tabCount) : 0, status, statusText: statusText(status), statusTag: statusTag(status) };
   });
+  const workspaces = naturalWorkspaces.map((workspace, index) => ({ workspace, index })).sort((left, right) => {
+    const priority = STATUS_PRIORITY[left.workspace.status] - STATUS_PRIORITY[right.workspace.status];
+    if (priority) return priority;
+    const activity = (recentActivity.get(right.workspace.id) ?? -1) - (recentActivity.get(left.workspace.id) ?? -1);
+    return activity || left.index - right.index;
+  }).map(({ workspace }) => workspace);
   const paneCount = workspaces.reduce((total, item) => total + item.paneCount, 0); const tabCount = workspaces.reduce((total, item) => total + item.tabCount, 0); const allStatus = spaceStatus(workspaces);
   return [{ id: null, label: 'ALL', number: null, paneCount, tabCount, status: allStatus, statusText: statusText(allStatus), statusTag: statusTag(allStatus), isAll: true }, ...workspaces.map((workspace) => ({ ...workspace, isAll: false }))];
 }
