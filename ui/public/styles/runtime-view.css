@@ -14,25 +14,48 @@
 .pane-spaces .pane-body {
   display: grid;
   align-content: start;
-  gap: var(--space-2);
+  gap: 2px;
+  padding: var(--space-2);
+}
+
+.runtime-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: var(--space-1);
+  overflow: hidden;
+  background: var(--line);
+  border: var(--border-width) solid var(--line);
+}
+
+.runtime-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px var(--space-1);
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  font-size: 10px;
+  text-transform: uppercase;
 }
 
 .space-button {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-1) var(--space-2);
-  min-height: var(--target);
-  padding: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 2.25rem;
+  padding: var(--space-1) var(--space-2);
   color: var(--fg);
-  background: var(--bg-raised);
-  border: var(--border-width) solid var(--line);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
   text-align: left;
 }
 
 .space-button:hover,
 .space-button.is-selected {
   border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(217, 119, 87, 0.16);
+  background: var(--bg-raised);
 }
 
 .space-label,
@@ -41,17 +64,23 @@
   overflow-wrap: anywhere;
 }
 
-.space-counts {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: var(--space-1);
-  color: var(--fg-muted);
-  font-size: var(--fs-xxs);
+.space-label {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ascii-bars {
-  color: var(--accent);
-  white-space: pre-wrap;
+.space-counts {
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.space-button .tag {
+  padding: 0;
+  border: 0;
+  font-size: 9px;
 }
 
 .transcript-meta {
@@ -81,12 +110,16 @@
 
 .follow-toggle {
   flex: 0 0 auto;
+  min-height: 2rem;
+  padding-inline: var(--space-2);
 }
 
 .pane-transcript .pane-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  overflow: hidden;
 }
 
 .transcript-toolbar {
@@ -95,16 +128,27 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-width) solid var(--line-faint);
 }
 
 .transcript-text {
-  min-height: 12rem;
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
-  padding: var(--space-3);
+  padding: var(--space-2);
   overflow: auto;
+  scrollbar-gutter: stable;
   color: var(--fg);
   background: var(--bg-sunken);
   border: var(--border-width) solid var(--line-faint);
+  font-size: var(--fs-xxs);
+  line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .pane-transcript .pane-body { overflow: visible; }
+  .transcript-text { min-height: 20rem; max-height: 65vh; }
 }

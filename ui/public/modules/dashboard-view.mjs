@@ -1,8 +1,9 @@
 import { clearChildren, createElement } from './dom-helpers.mjs';
 import { ACTIONS } from './ui-store.mjs';
 import { renderOrchestrationGraph } from './orchestration-graph-view.mjs';
+import { createGraphViewportState } from './orchestration-graph-viewport.mjs';
 import {
-  asciiOccupancy, buildRuntimeTotals, buildSpaceViewModels,
+  buildRuntimeTotals, buildSpaceViewModels,
 } from './view-models.mjs';
 
 const TOTAL_KEYS = Object.freeze(['spaces', 'agents', 'working', 'blocked', 'idle', 'done']);
@@ -14,18 +15,14 @@ function statusClass(status) {
 }
 
 function statusNode(documentRef, model) {
-  return createElement('span', { class: `tag ${statusClass(model.status)}` }, [
-    `${model.statusTag} ${model.statusText}`,
+  return createElement('span', { class: `tag ${statusClass(model.status)}`, 'aria-label': model.statusText }, [
+    model.statusTag,
   ], documentRef);
 }
 
-function countNode(documentRef, space, paneCapacity, tabCapacity) {
+function countNode(documentRef, space) {
   return createElement('span', { class: 'space-counts' }, [
-    `panes ${space.paneCount} tabs ${space.tabCount}`,
-    createElement('span', { class: 'ascii-bars', 'aria-label': 'pane and tab occupancy' }, [
-      `P ${asciiOccupancy(space.paneCount, paneCapacity, 8)}`,
-      ` T ${asciiOccupancy(space.tabCount, tabCapacity, 8)}`,
-    ], documentRef),
+    `${space.paneCount}P · ${space.tabCount}T`,
   ], documentRef);
 }
 
@@ -42,7 +39,7 @@ function totalsNode(documentRef, totals) {
   }, [`${key} ${totals[key]}`], documentRef)), documentRef);
 }
 
-function spaceButton(documentRef, space, selected, paneCapacity, tabCapacity) {
+function spaceButton(documentRef, space, selected) {
   const button = createElement('button', {
     class: `space-button${selected ? ' is-selected' : ''}`,
     type: 'button',
@@ -51,8 +48,7 @@ function spaceButton(documentRef, space, selected, paneCapacity, tabCapacity) {
     'aria-label': `${space.label} space, ${space.statusText}, ${space.paneCount} panes, ${space.tabCount} tabs`,
   }, [
     createElement('span', { class: 'space-label' }, [space.label], documentRef),
-    statusNode(documentRef, space),
-    countNode(documentRef, space, paneCapacity, tabCapacity),
+    countNode(documentRef, space), statusNode(documentRef, space),
   ], documentRef);
   return button;
 }
@@ -61,17 +57,15 @@ function renderSpaces(documentRef, root, state) {
   clearChildren(root);
   root.appendChild(totalsNode(documentRef, buildRuntimeTotals(state.runtime)));
   const spaces = buildSpaceViewModels(state.runtime);
-  const paneCapacity = Math.max(1, ...spaces.map((space) => space.paneCount));
-  const tabCapacity = Math.max(1, ...spaces.map((space) => space.tabCount));
   const selected = state.selectedWorkspace;
   for (const space of spaces) {
     const active = space.isAll ? selected === null : space.id === selected;
-    root.appendChild(spaceButton(documentRef, space, active, paneCapacity, tabCapacity));
+    root.appendChild(spaceButton(documentRef, space, active));
   }
 }
 
-function renderGraph(documentRef, root, state) {
-  renderOrchestrationGraph(documentRef, root, state);
+function renderGraph(documentRef, root, state, viewportState) {
+  renderOrchestrationGraph(documentRef, root, state, { viewportState });
 }
 
 export function createDashboardView(options = {}) {
@@ -81,10 +75,11 @@ export function createDashboardView(options = {}) {
   const agentsRoot = options.graphRoot ?? options.agentsRoot ?? documentRef?.querySelector?.('[data-pane-body="agents"]');
   const onSelectPane = options.onSelectPane;
   if (!store || !spacesRoot || !agentsRoot) return Object.freeze({ destroy() {} });
+  const viewportState = createGraphViewportState();
 
   const render = (state = store.getState()) => {
     renderSpaces(documentRef, spacesRoot, state);
-    renderGraph(documentRef, agentsRoot, state);
+    renderGraph(documentRef, agentsRoot, state, viewportState);
   };
   const onSpaceClick = (event) => {
     const button = event.target?.closest?.('[data-space-id]');

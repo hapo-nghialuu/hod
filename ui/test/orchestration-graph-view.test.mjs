@@ -43,7 +43,11 @@ function descendants(node, result = []) {
   return result;
 }
 
-test('lane layout separates reviewer/tester and scales for many workers and mobile', () => {
+function visibleText(node) {
+  return node.nodeType === 3 ? node.textContent : (node.children ?? []).map(visibleText).join('');
+}
+
+test('lane layout fans out a single worker lane and scales for mobile', () => {
   const runtime = {
     agents: [
       agent('controller', 'controller'),
@@ -58,7 +62,7 @@ test('lane layout separates reviewer/tester and scales for many workers and mobi
   assert.notDeepEqual(bottom[0].position.desktop, bottom[1].position.desktop);
   assert.equal(new Set(workers.map((node) => `${node.position.desktop.x}:${node.position.desktop.y}`)).size, 8);
   assert.equal(new Set(model.nodes.map((node) => node.position.mobile.y)).size, model.nodes.length);
-  assert.equal(new Set(workers.map((node) => node.position.desktop.x)).size, 2);
+  assert.equal(new Set(workers.map((node) => node.position.desktop.x)).size, 1);
   assert.ok(model.height > 420);
   assert.ok(model.mobileHeight > model.height);
   for (const count of [1, 3, 8, 20]) {
@@ -145,13 +149,21 @@ test('CSP-safe SVG canvases keep unmapped nodes distinct without inline styles',
   const root = new FakeNode('div', fakeDocument);
   const model = renderOrchestrationGraph(fakeDocument, root, { runtime: { agents: [
     agent('controller', 'controller'),
-    agent('worker', 'worker'),
+    agent('worker', 'worker', { status: 'working' }),
     { paneId: 'orphan-a', display: 'orphan-a', status: 'idle', orchestration: null },
     { paneId: 'orphan-b', display: 'orphan-b', status: 'idle', orchestration: null },
   ] } });
   const rendered = [root, ...descendants(root)];
   assert.equal(rendered.some((node) => Object.hasOwn(node.attrs, 'style')), false);
   assert.equal(model.edges.length, 1);
+  assert.match(visibleText(root), /\[COORDINATOR\]/);
+  const avatars = rendered.filter((node) => node.name === 'svg' && node.attrs.class === 'graph-agent-avatar');
+  assert.equal(avatars.length, 8);
+  assert.ok(avatars.every((node) => node.attrs.viewBox === '0 0 48 48' && node.attrs['aria-hidden'] === 'true'));
+  assert.equal(rendered.filter((node) => node.attrs.class === 'graph-agent-signal').length, 8);
+  const workingButtons = rendered.filter((node) => node.attrs.class?.includes('is-working'));
+  assert.equal(workingButtons.length, 2);
+  assert.ok(workingButtons.every((node) => node.attrs['data-agent-status'] === 'working'));
   const canvases = descendants(root).filter((node) => node.name === 'svg' && node.attrs['data-graph-variant']);
   assert.deepEqual(canvases.map((node) => node.attrs['data-graph-variant']), ['desktop', 'mobile']);
   for (const canvas of canvases) {

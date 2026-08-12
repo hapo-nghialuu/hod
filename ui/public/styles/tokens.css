@@ -20,6 +20,11 @@
   --color-warn-foreground: #f3d9a0;
   --color-error: #c9544b;
   --color-error-foreground: #f2b8b2;
+  --color-role-coordinator: #D97757;
+  --color-role-worker: #65B8A6;
+  --color-role-advisor: #E0AD5B;
+  --color-role-review: #B2A4E0;
+  --color-role-unmapped: #8a877f;
 
   /* Compatibility aliases used by view modules */
   --bg: var(--color-background);
@@ -37,6 +42,11 @@
   --warn-fg: var(--color-warn-foreground);
   --err: var(--color-error);
   --err-fg: var(--color-error-foreground);
+  --role-coordinator: var(--color-role-coordinator);
+  --role-worker: var(--color-role-worker);
+  --role-advisor: var(--color-role-advisor);
+  --role-review: var(--color-role-review);
+  --role-unmapped: var(--color-role-unmapped);
 
   /* Lines and geometry */
   --line: #3a3833;

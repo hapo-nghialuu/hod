@@ -36,7 +36,7 @@ button:disabled {
 
 .pane-title {
   flex: 0 0 auto;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   color: var(--fg-muted);
   border-bottom: var(--border-width) solid var(--line);
   font-size: var(--fs-xs);

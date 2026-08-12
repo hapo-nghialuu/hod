@@ -1,11 +1,11 @@
-const ROW_GAP = 132;
-const MIN_HEIGHT = 420;
+const ROW_GAP = 110;
+const MIN_HEIGHT = 340;
 const BAND_X = Object.freeze([18, 50, 82]);
-const WORKER_X = Object.freeze([62, 88]);
-const NODE_HEIGHT = 112;
-const NODE_VERTICAL_PADDING = 28;
+const WORKER_X = 74;
+const NODE_HEIGHT = 88;
+const NODE_VERTICAL_PADDING = 32;
 const DESKTOP_NODE_WIDTH = 24;
-const MOBILE_NODE_WIDTH = 76;
+const MOBILE_NODE_WIDTH = 84;
 
 function rowsFor(count, columns) {
   return Math.ceil(count / columns);
@@ -36,7 +36,7 @@ export function layoutOrchestrationNodes(nodes) {
   const workers = nodes.filter((node) => node.role === 'worker');
   const bottom = nodes.filter((node) => node.role === 'reviewer' || node.role === 'tester');
   const advisorRows = rowsFor(advisors.length, BAND_X.length);
-  const middleRows = Math.max(1, controllers.length, rowsFor(workers.length, WORKER_X.length));
+  const middleRows = Math.max(1, controllers.length, workers.length);
   const bottomRows = rowsFor(bottom.length, BAND_X.length);
   const desktop = rowGeometry(advisorRows + middleRows + bottomRows);
   const middleStart = advisorRows;
@@ -47,14 +47,15 @@ export function layoutOrchestrationNodes(nodes) {
     mobile: { x: 50, y: 50, width: MOBILE_NODE_WIDTH, height: NODE_HEIGHT },
   };
   placeBand(advisors, 0, desktop, DESKTOP_NODE_WIDTH);
+  const controllerOffset = Math.max(0, (middleRows - controllers.length) / 2);
   controllers.forEach((node, index) => {
     node.position.desktop = {
-      x: 20, y: desktop.y(middleStart + index), width: DESKTOP_NODE_WIDTH, height: NODE_HEIGHT,
+      x: 20, y: desktop.y(middleStart + controllerOffset + index), width: DESKTOP_NODE_WIDTH, height: NODE_HEIGHT,
     };
   });
   workers.forEach((node, index) => {
     node.position.desktop = {
-      x: WORKER_X[index % 2], y: desktop.y(middleStart + Math.floor(index / 2)),
+      x: WORKER_X, y: desktop.y(middleStart + index),
       width: DESKTOP_NODE_WIDTH, height: NODE_HEIGHT,
     };
   });

@@ -52,14 +52,15 @@ function buildToolbar(documentRef, state, transcript) {
     'aria-pressed': following ? 'true' : 'false',
   }, [`FOLLOW ${following ? 'ON' : 'OFF'}`], documentRef);
   const markers = markerText(state, transcript);
-  const meta = !transcript ? 'REVISION —'
+  const pane = typeof transcript?.paneId === 'string' ? `PANE ${transcript.paneId.slice(0, 48)} · ` : '';
+  const detail = !transcript ? 'REVISION —'
     : transcript.status === 'loading' ? 'LOADING'
       : transcript.status === 'error' ? `ERROR ${safeErrorCode(transcript.errorCode)}`
         : transcript.status === 'success' && isValidTranscript(transcript, transcript.paneId)
           ? [`REVISION ${revisionOf(transcript)}`, ...markers].join(' · ') : 'UNAVAILABLE';
   return createElement('div', { class: 'transcript-toolbar' }, [
     button,
-    createElement('span', { class: 'transcript-meta' }, [meta || 'LIVE'], documentRef),
+    createElement('span', { class: 'transcript-meta' }, [`${pane}${detail}` || 'LIVE'], documentRef),
   ], documentRef);
 }
 
