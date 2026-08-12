@@ -1,0 +1,182 @@
+/* orchestration-graph.css — native SVG edges and terminal node lanes */
+.pane-orchestration .pane-body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.orchestration-graph {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.graph-summary,
+.graph-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.graph-summary {
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.graph-summary strong {
+  color: var(--accent);
+}
+
+.graph-legend {
+  list-style: none;
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+}
+
+.graph-legend-item::before {
+  display: inline-block;
+  width: 1.5rem;
+  margin-right: var(--space-1);
+  border-top: 2px solid currentColor;
+  vertical-align: middle;
+  content: '';
+}
+
+.graph-legend-item.edge-delegate { color: var(--accent); }
+.graph-legend-item.edge-consult { color: var(--warn-fg); }
+.graph-legend-item.edge-consult::before { border-top-style: dashed; }
+.graph-legend-item.edge-verify { color: var(--fg-muted); }
+.graph-legend-item.edge-verify::before { border-top-style: dotted; }
+
+.graph-stage {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  border: var(--border-width) solid var(--line);
+}
+
+.graph-canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+
+.graph-edges {
+  pointer-events: none;
+}
+
+.graph-canvas-mobile {
+  display: none;
+}
+
+.graph-edge {
+  fill: none;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.edge-delegate { stroke: var(--accent); }
+.edge-consult { stroke: var(--warn-fg); stroke-dasharray: 7 6; }
+.edge-verify { stroke: var(--fg-muted); stroke-dasharray: 1 8; stroke-linecap: round; }
+.graph-arrow { stroke: none; }
+.graph-arrow.edge-delegate { fill: var(--accent); }
+.graph-arrow.edge-consult { fill: var(--warn-fg); }
+.graph-arrow.edge-verify { fill: var(--fg-muted); }
+
+.graph-edge.is-target-working {
+  animation: graph-edge-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes graph-edge-pulse {
+  50% { opacity: 0.34; }
+}
+
+.graph-lane-label {
+  display: block;
+  color: var(--fg-faint);
+  font-size: var(--fs-xxs);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.graph-lane-worker,
+.graph-lane-review { text-align: right; }
+
+.graph-node {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 7rem;
+  max-height: 7rem;
+  padding: var(--space-2);
+  overflow: hidden;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: var(--border-width) solid var(--line-strong);
+  text-align: left;
+}
+
+.graph-node-container { overflow: visible; }
+
+.graph-node:hover,
+.graph-node.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(217, 119, 87, 0.16);
+}
+
+.graph-node-role,
+.graph-node-status,
+.graph-node-meta {
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+}
+
+.graph-node-role { color: var(--accent); }
+.graph-node-name,
+.graph-node-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-node.is-unmapped { border-style: dashed; }
+.graph-node.is-disconnected .graph-node-role { color: var(--warn-fg); }
+.graph-node:focus-visible {
+  color: var(--bg);
+  background: var(--accent);
+}
+.graph-node:focus-visible .graph-node-role,
+.graph-node:focus-visible .graph-node-status,
+.graph-node:focus-visible .graph-node-meta {
+  color: var(--bg);
+}
+.graph-node:disabled { cursor: not-allowed; opacity: 0.72; }
+
+.graph-help {
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+}
+
+@media (max-width: 760px) {
+  .orchestration-graph { padding: var(--space-2); }
+
+  .graph-canvas-desktop { display: none; }
+  .graph-canvas-mobile { display: block; }
+  .graph-lane-label { display: none; }
+}
+
+@media (min-width: 761px) {
+  .graph-canvas-mobile { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-edge.is-target-working {
+    animation: none;
+  }
+}

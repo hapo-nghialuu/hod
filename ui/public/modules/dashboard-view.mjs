@@ -1,8 +1,11 @@
-import { clearChildren, createElement, setAttribute, textContent } from './dom-helpers.mjs';
+import { clearChildren, createElement } from './dom-helpers.mjs';
 import { ACTIONS } from './ui-store.mjs';
+import { renderOrchestrationGraph } from './orchestration-graph-view.mjs';
 import {
-  asciiOccupancy, buildAgentViewModels, buildSpaceViewModels,
+  asciiOccupancy, buildRuntimeTotals, buildSpaceViewModels,
 } from './view-models.mjs';
+
+const TOTAL_KEYS = Object.freeze(['spaces', 'agents', 'working', 'blocked', 'idle', 'done']);
 
 function statusClass(status) {
   if (status === 'blocked') return 'status-err';
@@ -26,12 +29,26 @@ function countNode(documentRef, space, paneCapacity, tabCapacity) {
   ], documentRef);
 }
 
+function totalsNode(documentRef, totals) {
+  return createElement('p', {
+    class: 'runtime-totals',
+    'data-runtime-totals': '',
+    role: 'status',
+    'aria-label': 'Global runtime totals',
+  }, TOTAL_KEYS.map((key) => createElement('span', {
+    class: 'runtime-total',
+    'data-runtime-total': key,
+    'aria-label': `${key} ${totals[key]}`,
+  }, [`${key} ${totals[key]}`], documentRef)), documentRef);
+}
+
 function spaceButton(documentRef, space, selected, paneCapacity, tabCapacity) {
   const button = createElement('button', {
     class: `space-button${selected ? ' is-selected' : ''}`,
     type: 'button',
     'data-space-id': space.isAll ? '' : space.id,
     'aria-pressed': selected ? 'true' : 'false',
+    'aria-label': `${space.label} space, ${space.statusText}, ${space.paneCount} panes, ${space.tabCount} tabs`,
   }, [
     createElement('span', { class: 'space-label' }, [space.label], documentRef),
     statusNode(documentRef, space),
@@ -42,6 +59,7 @@ function spaceButton(documentRef, space, selected, paneCapacity, tabCapacity) {
 
 function renderSpaces(documentRef, root, state) {
   clearChildren(root);
+  root.appendChild(totalsNode(documentRef, buildRuntimeTotals(state.runtime)));
   const spaces = buildSpaceViewModels(state.runtime);
   const paneCapacity = Math.max(1, ...spaces.map((space) => space.paneCount));
   const tabCapacity = Math.max(1, ...spaces.map((space) => space.tabCount));
@@ -52,53 +70,21 @@ function renderSpaces(documentRef, root, state) {
   }
 }
 
-function agentButton(documentRef, agent, selected) {
-  return createElement('button', {
-    class: `bracket-button agent-select${selected ? ' is-selected' : ''}`,
-    type: 'button',
-    'data-pane-id': agent.id,
-    'aria-pressed': selected ? 'true' : 'false',
-  }, ['[ SELECT ]'], documentRef);
-}
-
-function agentRow(documentRef, agent, selected) {
-  return createElement('article', { class: `agent-row${selected ? ' is-selected' : ''}` }, [
-    createElement('div', { class: 'agent-heading' }, [
-      createElement('strong', { class: 'agent-name' }, [agent.displayName], documentRef),
-      statusNode(documentRef, agent),
-    ], documentRef),
-    createElement('p', { class: 'agent-meta' }, [
-      `${agent.statusTag} ${agent.statusText} · pane ${agent.id ?? '—'}`,
-    ], documentRef),
-    agentButton(documentRef, agent, selected),
-  ], documentRef);
-}
-
-function renderAgents(documentRef, root, state) {
-  clearChildren(root);
-  const runtime = state.runtime ?? {};
-  const selectedPane = state.transcript?.paneId ?? runtime.selectedPaneId ?? null;
-  const agents = buildAgentViewModels(runtime, state.selectedWorkspace);
-  if (!agents.length) {
-    root.appendChild(createElement('p', { class: 'empty-state' }, [
-      state.selectedWorkspace ? 'No agents in this space.' : 'No agents reported.',
-    ], documentRef));
-    return;
-  }
-  for (const agent of agents) root.appendChild(agentRow(documentRef, agent, agent.id === selectedPane));
+function renderGraph(documentRef, root, state) {
+  renderOrchestrationGraph(documentRef, root, state);
 }
 
 export function createDashboardView(options = {}) {
   const documentRef = options.documentRef ?? globalThis.document;
   const store = options.store;
   const spacesRoot = options.spacesRoot ?? documentRef?.querySelector?.('[data-pane-body="spaces"]');
-  const agentsRoot = options.agentsRoot ?? documentRef?.querySelector?.('[data-pane-body="agents"]');
+  const agentsRoot = options.graphRoot ?? options.agentsRoot ?? documentRef?.querySelector?.('[data-pane-body="agents"]');
   const onSelectPane = options.onSelectPane;
   if (!store || !spacesRoot || !agentsRoot) return Object.freeze({ destroy() {} });
 
   const render = (state = store.getState()) => {
     renderSpaces(documentRef, spacesRoot, state);
-    renderAgents(documentRef, agentsRoot, state);
+    renderGraph(documentRef, agentsRoot, state);
   };
   const onSpaceClick = (event) => {
     const button = event.target?.closest?.('[data-space-id]');
@@ -111,7 +97,6 @@ export function createDashboardView(options = {}) {
     if (!button || (typeof agentsRoot.contains === 'function' && !agentsRoot.contains(button))) return;
     const paneId = button.getAttribute('data-pane-id');
     if (!paneId) return;
-    store.dispatch({ type: ACTIONS.TRANSCRIPT_SELECT, paneId });
     try { await onSelectPane?.(paneId); } catch { /* app owns the statusbar */ }
   };
   spacesRoot.addEventListener?.('click', onSpaceClick);

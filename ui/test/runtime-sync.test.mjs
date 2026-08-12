@@ -94,6 +94,22 @@ test('open, error, and bounded resync signals refresh runtime and settings', asy
   sync.stop();
 });
 
+test('observer capabilities skip settings while legacy settings 404 remains a failure', async () => {
+  const clock = timers(); const sources = []; const statuses = []; let phase = 0; let settingsCalls = 0;
+  const api = {
+    getState: async () => ({ capabilities: { settings: phase++ > 0 } }),
+    getSettings: async () => { settingsCalls += 1; throw Object.assign(new Error('route'), { status: 404 }); },
+    openEvents: (handlers) => { const source = new FakeSource(handlers); sources.push(source); return source; },
+  };
+  const sync = createRuntimeSync({ api, setTimeoutImpl: clock.setTimeout, clearTimeoutImpl: clock.clearTimeout,
+    onStatus: (message, code) => statuses.push([message, code]) });
+  sync.open(); sources[0].emit('open'); await flush();
+  assert.equal(settingsCalls, 0); assert.deepEqual(statuses.at(-1), ['refresh complete', 'OK']);
+  sources[0].emit('resync', {}); await flush();
+  assert.equal(settingsCalls, 1); assert.deepEqual(statuses.at(-1), ['refresh failed', 'ERR_UNAVAILABLE']);
+  sync.stop();
+});
+
 test('an oversized SseHub resync reaches runtime refresh through EventSource', async () => {
   const clock = timers();
   const states = [];
@@ -155,18 +171,19 @@ test('an oversized SseHub resync reaches runtime refresh through EventSource', a
 
 test('a late failed refresh cannot overwrite a newer connection refresh', async () => {
   const clock = timers(); const sources = []; const states = []; const settings = [];
-  let resolveState; let resolveSettings; let stateCalls = 0;
+  let resolveSettings; let stateCalls = 0; let settingsCalls = 0;
   const api = {
-    getState: () => (++stateCalls === 1 ? new Promise((resolve) => { resolveState = resolve; }) : Promise.resolve({ revision: stateCalls })),
-    getSettings: () => (stateCalls === 1 ? new Promise((resolve) => { resolveSettings = resolve; }) : Promise.resolve({ revision: 2 })),
+    getState: () => Promise.resolve({ revision: ++stateCalls }),
+    getSettings: () => (++settingsCalls === 1
+      ? new Promise((resolve) => { resolveSettings = resolve; }) : Promise.resolve({ revision: 2 })),
     openEvents: (handlers) => { const source = new FakeSource(handlers); sources.push(source); return source; },
   };
   const sync = createRuntimeSync({ api, setTimeoutImpl: clock.setTimeout, clearTimeoutImpl: clock.clearTimeout,
     onState: (value) => states.push(value), onSettings: (value) => settings.push(value) });
   sync.open(); sources[0].emit('open'); await flush();
   sources[0].emit('error', new Error('socket')); await flush();
-  assert.deepEqual(states, [{ revision: 2 }]); assert.deepEqual(settings, [{ revision: 2 }]);
-  resolveState({ revision: 1 }); resolveSettings({ revision: 1 }); await flush();
-  assert.deepEqual(states, [{ revision: 2 }]); assert.deepEqual(settings, [{ revision: 2 }]);
+  assert.deepEqual(states, [{ revision: 1 }, { revision: 2 }]); assert.deepEqual(settings, [{ revision: 2 }]);
+  resolveSettings({ revision: 1 }); await flush();
+  assert.deepEqual(settings, [{ revision: 2 }]);
   sync.stop();
 });

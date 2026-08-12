@@ -1,4 +1,4 @@
-/* runtime-view.css — spaces, agents, and terminal controls */
+/* runtime-view.css — spaces and terminal controls */
 .brand-prompt {
   color: var(--fg-muted);
 }
@@ -11,8 +11,7 @@
   scrollbar-color: var(--line-strong) var(--bg-sunken);
 }
 
-.pane-spaces .pane-body,
-.pane-agents .pane-body {
+.pane-spaces .pane-body {
   display: grid;
   align-content: start;
   gap: var(--space-2);
@@ -37,7 +36,6 @@
 }
 
 .space-label,
-.agent-name,
 .setting-key {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -56,26 +54,6 @@
   white-space: pre-wrap;
 }
 
-.agent-row {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: var(--border-width) solid var(--line);
-}
-
-.agent-row.is-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(217, 119, 87, 0.16);
-}
-
-.agent-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.agent-meta,
 .transcript-meta {
   color: var(--fg-muted);
   font-size: var(--fs-xxs);
@@ -129,10 +107,4 @@
   border: var(--border-width) solid var(--line-faint);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-@media (max-width: 760px) {
-  .agent-heading {
-    flex-wrap: wrap;
-  }
 }

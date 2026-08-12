@@ -3,7 +3,7 @@ import { createConsoleView } from './modules/console-view.mjs';
 import { createDashboardView } from './modules/dashboard-view.mjs';
 import { createSettingsView } from './modules/settings-view.mjs';
 import { createTranscriptView } from './modules/transcript-view.mjs';
-import { ACTIONS, createStore, reducer } from './modules/ui-store.mjs';
+import { ACTIONS, createStore, isValidTranscript, reducer } from './modules/ui-store.mjs';
 import { createRuntimeSync } from './modules/runtime-sync.mjs';
 
 export function publicErrorCode(error) {
@@ -20,12 +20,19 @@ function statusbar(store, message, status) {
   store.dispatch({ type: ACTIONS.STATUSBAR_SET, statusbar: { message, status } });
 }
 
+export function ownsTranscriptRequest(store, paneId, requestId) {
+  const transcript = store?.getState?.().transcript;
+  return transcript?.status === 'loading' && transcript.paneId === String(paneId)
+    && transcript.requestId === requestId;
+}
+
 export function bootstrapApp(options = {}) {
   const documentRef = options.documentRef ?? globalThis.document;
   if (!documentRef) return Promise.resolve(null);
   const store = createStore({ reducer });
   const api = options.api ?? createApiClient(options);
   let stopped = false;
+  let transcriptRequestId = 0;
   const sync = createRuntimeSync({
     api,
     getState: () => store.getState(),
@@ -44,7 +51,7 @@ export function bootstrapApp(options = {}) {
     onEvent(type, payload) {
       if (type === 'connection') store.dispatch(connectionAction(payload?.status ?? payload?.state ?? 'connected'));
       if (type === 'state') store.dispatch({ type: ACTIONS.STATE_REPLACE, state: payload?.state ?? payload });
-      if (type === 'transcript') store.dispatch({ type: ACTIONS.TRANSCRIPT_REPLACE, transcript: payload?.transcript ?? payload });
+      if (type === 'transcript') store.dispatch({ type: ACTIONS.TRANSCRIPT_PUSH, transcript: payload?.transcript ?? payload });
       if (type === 'settings') store.dispatch({ type: ACTIONS.SETTINGS_REPLACE, settings: payload?.settings ?? payload });
     },
   });
@@ -52,17 +59,24 @@ export function bootstrapApp(options = {}) {
   const refresh = sync.refresh;
 
   async function selectPane(paneId) {
+    const requestId = ++transcriptRequestId;
+    store.dispatch({ type: ACTIONS.TRANSCRIPT_SELECT, paneId, requestId });
+    statusbar(store, 'transcript loading', 'LOADING');
     try {
       const result = await api.selectTranscript(paneId);
       const transcript = result?.transcript ?? result;
-      if (transcript && typeof transcript === 'object'
-        && (transcript.paneId || transcript.pane_id || transcript.text || transcript.lines || transcript.content)) {
-        store.dispatch({ type: ACTIONS.TRANSCRIPT_REPLACE, transcript });
-      }
-      statusbar(store, 'transcript selected', 'OK');
+      if (!isValidTranscript(transcript, paneId)) throw Object.assign(new Error('invalid transcript'), { code: 'ERR_INVALID_TRANSCRIPT' });
+      const ownsRequest = ownsTranscriptRequest(store, paneId, requestId);
+      if (!ownsRequest) return result;
+      store.dispatch({ type: ACTIONS.TRANSCRIPT_REPLACE, transcript, requestId });
+      if (ownsRequest) statusbar(store, 'transcript selected', 'OK');
       return result;
     } catch (error) {
-      statusbar(store, 'transcript selection failed', publicErrorCode(error));
+      if (ownsTranscriptRequest(store, paneId, requestId)) {
+        const errorCode = publicErrorCode(error);
+        store.dispatch({ type: ACTIONS.TRANSCRIPT_ERROR, paneId, requestId, errorCode });
+        statusbar(store, 'transcript selection failed', errorCode);
+      }
       throw error;
     }
   }

@@ -1,5 +1,5 @@
 import { clearChildren, createElement, setAttribute, textContent } from './dom-helpers.mjs';
-import { ACTIONS } from './ui-store.mjs';
+import { ACTIONS, isValidTranscript } from './ui-store.mjs';
 
 function stringValue(value) {
   return typeof value === 'string' ? value : '';
@@ -39,6 +39,10 @@ function revisionOf(transcript) {
   return revision === undefined || revision === null || revision === '' ? '—' : String(revision);
 }
 
+function safeErrorCode(value) {
+  return typeof value === 'string' && /^[A-Z][A-Z0-9_:-]{0,63}$/.test(value) ? value : 'ERR_UNAVAILABLE';
+}
+
 function buildToolbar(documentRef, state, transcript) {
   const following = state.followTail === true;
   const button = createElement('button', {
@@ -48,10 +52,11 @@ function buildToolbar(documentRef, state, transcript) {
     'aria-pressed': following ? 'true' : 'false',
   }, [`FOLLOW ${following ? 'ON' : 'OFF'}`], documentRef);
   const markers = markerText(state, transcript);
-  const meta = [
-    `REVISION ${revisionOf(transcript)}`,
-    ...markers,
-  ].join(' · ');
+  const meta = !transcript ? 'REVISION —'
+    : transcript.status === 'loading' ? 'LOADING'
+      : transcript.status === 'error' ? `ERROR ${safeErrorCode(transcript.errorCode)}`
+        : transcript.status === 'success' && isValidTranscript(transcript, transcript.paneId)
+          ? [`REVISION ${revisionOf(transcript)}`, ...markers].join(' · ') : 'UNAVAILABLE';
   return createElement('div', { class: 'transcript-toolbar' }, [
     button,
     createElement('span', { class: 'transcript-meta' }, [meta || 'LIVE'], documentRef),
@@ -59,21 +64,36 @@ function buildToolbar(documentRef, state, transcript) {
 }
 
 function render(documentRef, root, state) {
-  const previousScroll = Number(root.scrollTop) || 0;
+  const previousScroll = Number(root.querySelector?.('.transcript-text')?.scrollTop) || 0;
   const transcript = state.transcript;
+  let scrollOwner = null;
   clearChildren(root);
   root.appendChild(buildToolbar(documentRef, state, transcript));
   if (!transcript) {
     root.appendChild(createElement('p', { class: 'empty-state' }, [
       'Select an agent to view its transcript.',
     ], documentRef));
+  } else if (transcript.status === 'loading') {
+    root.appendChild(createElement('p', {
+      class: 'empty-state', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true',
+    }, ['Loading transcript…'], documentRef));
+  } else if (transcript.status === 'error') {
+    root.appendChild(createElement('p', {
+      class: 'empty-state status-err', role: 'alert', 'aria-live': 'assertive', 'aria-atomic': 'true',
+    }, [
+      `Transcript unavailable: ${safeErrorCode(transcript.errorCode)}`,
+    ], documentRef));
+  } else if (transcript.status === 'success' && isValidTranscript(transcript, transcript.paneId)) {
+    scrollOwner = createElement('pre', { class: 'transcript-text', tabindex: '0' }, [], documentRef);
+    textContent(scrollOwner, transcriptText(transcript));
+    root.appendChild(scrollOwner);
   } else {
-    const pre = createElement('pre', { class: 'transcript-text', tabindex: '0' }, [], documentRef);
-    textContent(pre, transcriptText(transcript));
-    root.appendChild(pre);
+    root.appendChild(createElement('p', { class: 'empty-state status-err' }, ['Transcript unavailable: ERR_INVALID_TRANSCRIPT'], documentRef));
   }
-  if (state.followTail) root.scrollTop = Number(root.scrollHeight) || 0;
-  else root.scrollTop = previousScroll;
+  if (scrollOwner) {
+    if (state.followTail) scrollOwner.scrollTop = Number(scrollOwner.scrollHeight) || 0;
+    else scrollOwner.scrollTop = previousScroll;
+  }
 }
 
 export function createTranscriptView(options = {}) {

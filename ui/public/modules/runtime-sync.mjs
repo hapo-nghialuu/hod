@@ -1,3 +1,5 @@
+import { capabilitiesForState } from './ui-store.mjs';
+
 const RETRY_MIN_MS = 250;
 const RETRY_MAX_MS = 5000;
 
@@ -24,6 +26,7 @@ export function createRuntimeSync(options = {}) {
   let retryDelay = retryMinMs;
   let refreshGeneration = 0;
   let stopped = false;
+  let settingsEnabled = true;
 
   function closeSource() {
     sourceGeneration += 1;
@@ -45,18 +48,30 @@ export function createRuntimeSync(options = {}) {
   async function refresh(reason = 'manual') {
     if (stopped) return options.getState?.() ?? null;
     const requestGeneration = ++refreshGeneration;
-    const results = await Promise.allSettled([
-      Promise.resolve().then(() => api.getState()),
-      Promise.resolve().then(() => api.getSettings()),
-    ]);
+    let failure = null;
+    let state;
+    let stateReceived = false;
+    try {
+      state = await api.getState();
+      stateReceived = true;
+    } catch (error) {
+      failure = error;
+    }
     if (stopped || requestGeneration !== refreshGeneration) return options.getState?.() ?? null;
-    let failure = results.find((result) => result.status === 'rejected')?.reason ?? null;
-    if (results[0].status === 'fulfilled') {
-      try { options.onState?.(results[0].value); } catch (error) { failure ??= error; }
+    if (stateReceived) {
+      settingsEnabled = capabilitiesForState(state).settings;
+      try { options.onState?.(state); } catch (error) { failure ??= error; }
+      if (stopped || requestGeneration !== refreshGeneration) return options.getState?.() ?? null;
+      if (settingsEnabled && typeof api.getSettings === 'function') {
+        try {
+          const settings = await api.getSettings();
+          if (!stopped && requestGeneration === refreshGeneration && settingsEnabled) {
+            try { options.onSettings?.(settings); } catch (error) { failure ??= error; }
+          }
+        } catch (error) { failure ??= error; }
+      }
     }
-    if (results[1].status === 'fulfilled') {
-      try { options.onSettings?.(results[1].value); } catch (error) { failure ??= error; }
-    }
+    if (stopped || requestGeneration !== refreshGeneration) return options.getState?.() ?? null;
     if (failure) {
       safeCall(options.onStatus, 'refresh failed', safeCode(failure, options.errorCode));
     } else {
@@ -89,6 +104,8 @@ export function createRuntimeSync(options = {}) {
         onEvent(type, payload, event) {
           if (!current()) return;
           if (type === 'resync') void refresh('resync').catch(() => {});
+          if (type === 'state') settingsEnabled = capabilitiesForState(payload?.state ?? payload).settings;
+          if (type === 'settings' && !settingsEnabled) return;
           safeCall(options.onEvent, type, payload, event);
         },
       });

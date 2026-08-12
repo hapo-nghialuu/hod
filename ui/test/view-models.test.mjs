@@ -5,7 +5,9 @@ import {
   asciiOccupancy,
   asciiProgress,
   buildAgentViewModels,
+  buildRuntimeTotals,
   buildSpaceViewModels,
+  buildTabViewModels,
   filterAgents,
   progressPercent,
   sortAgents,
@@ -68,4 +70,30 @@ test('spaces include ALL, preserve natural workspace order, counts, and aggregat
   assert.deepEqual([spaces[0].paneCount, spaces[0].tabCount], [5, 3]);
   assert.equal(spaces[0].statusTag, '[ERR]');
   assert.equal(spaces[1].statusText, 'blocked');
+});
+
+test('runtime totals cover every space and all four agent statuses', () => {
+  assert.deepEqual(buildRuntimeTotals({ workspaces: [{ id: 'one' }, { id: 'two' }], agents: [
+    { status: 'working' }, { status: 'blocked' }, { status: 'idle' }, { status: 'done' },
+  ] }), { spaces: 2, agents: 4, working: 1, blocked: 1, idle: 1, done: 1 });
+});
+
+test('tab view models retain every tab across spaces, including tabs with no agents', () => {
+  const runtime = {
+    workspaces: [{ id: 'space-1' }, { id: 'space-2' }],
+    tabs: [
+      { id: 'tab-2', workspaceId: 'space-2', number: 1, label: 'Second', paneCount: 1, status: 'idle' },
+      { id: 'tab-empty', workspaceId: 'space-1', number: 2, label: 'No Agents', paneCount: 0, status: 'done' },
+      { id: 'tab-1', workspaceId: 'space-1', number: 1, label: 'First', paneCount: 2, status: 'working' },
+    ],
+    agents: [{ paneId: 'pane-1', workspaceId: 'space-1', tabId: 'tab-1', status: 'working' }],
+  };
+  const tabs = buildTabViewModels(runtime);
+  assert.deepEqual(tabs.map(({ id, label }) => ({ id, label })), [
+    { id: 'tab-1', label: 'First' },
+    { id: 'tab-empty', label: 'No Agents' },
+    { id: 'tab-2', label: 'Second' },
+  ]);
+  assert.equal(tabs.find(({ id }) => id === 'tab-empty').paneCount, 0);
+  assert.deepEqual(buildTabViewModels(runtime, 'space-2').map(({ id }) => id), ['tab-2']);
 });
