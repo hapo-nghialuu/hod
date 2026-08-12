@@ -40,10 +40,12 @@ function totalsNode(documentRef, totals) {
 }
 
 function spaceButton(documentRef, space, selected) {
+  const working = !space.isAll && space.status === 'working';
   const button = createElement('button', {
-    class: `space-button${selected ? ' is-selected' : ''}`,
+    class: ['space-button', working ? 'is-working' : '', selected ? 'is-selected' : ''].filter(Boolean).join(' '),
     type: 'button',
     'data-space-id': space.isAll ? '' : space.id,
+    'data-space-status': space.status,
     'aria-pressed': selected ? 'true' : 'false',
     'aria-label': `${space.label} space, ${space.statusText}, ${space.paneCount} panes, ${space.tabCount} tabs`,
   }, [
@@ -59,8 +61,8 @@ function renderSpaces(documentRef, root, state) {
   const spaces = buildSpaceViewModels(state.runtime);
   const selected = state.selectedWorkspace;
   for (const space of spaces) {
-    const active = space.isAll ? selected === null : space.id === selected;
-    root.appendChild(spaceButton(documentRef, space, active));
+    const isSelected = space.isAll ? selected === null : space.id === selected;
+    root.appendChild(spaceButton(documentRef, space, isSelected));
   }
 }
 

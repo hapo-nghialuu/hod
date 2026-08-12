@@ -81,7 +81,7 @@ test('favicon reference points to an existing local SVG', () => {
 test('compact three-pane layout adapts on medium/mobile and graph motion is reducible', () => {
   const html = readFileSync(indexPath, 'utf8');
   const layoutCss = readFileSync(layoutPath, 'utf8');
-  const graphCss = readFileSync(join(publicRoot, 'styles', 'orchestration-graph.css'), 'utf8');
+  const graphCss = readFileSync(join(publicRoot, 'styles', 'orchestration-graph.css'), 'utf8'); const runtimeCss = readFileSync(join(publicRoot, 'styles', 'runtime-view.css'), 'utf8');
   assert.doesNotMatch(html, /<aside\b[^>]*\bclass=["']rail/);
   assert.doesNotMatch(html, /data-action=["']refresh/);
   assert.doesNotMatch(layoutCss, /\.rail\b/);
@@ -92,7 +92,7 @@ test('compact three-pane layout adapts on medium/mobile and graph motion is redu
   assert.match(graphCss, /\.graph-stage\s*\{[\s\S]*flex:\s*1 1 auto;[\s\S]*min-height:\s*340px;[\s\S]*overflow:\s*auto/); assert.match(graphCss, /\.graph-canvas\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*100%/); assert.match(graphCss, /\.graph-node\s*\{[\s\S]*box-sizing:\s*border-box;[\s\S]*height:\s*5\.5rem;[\s\S]*max-height:\s*5\.5rem;[\s\S]*overflow:\s*hidden/);
   assert.match(graphCss, /\.graph-node-name,\s*\.graph-node-meta\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*text-overflow:\s*ellipsis;[\s\S]*white-space:\s*nowrap/);
   assert.match(graphCss, /\.graph-agent-antenna,[\s\S]*\.graph-agent-shell,[\s\S]*stroke:\s*currentColor/); assert.match(graphCss, /\.graph-node-controller[^}]*--node-role-color:\s*var\(--role-coordinator\)[\s\S]*\.graph-node-worker[^}]*--node-role-color:\s*var\(--role-worker\)[\s\S]*\.graph-node-advisor[^}]*--node-role-color:\s*var\(--role-advisor\)/);
-  assert.match(graphCss, /\.graph-node\.is-working \.graph-agent-signal[\s\S]*animation:\s*graph-agent-signal/); assert.match(graphCss, /prefers-reduced-motion[\s\S]*\.graph-node\.is-working \.graph-agent-signal[\s\S]*animation:\s*none/);
+  assert.match(graphCss, /\.graph-node\.is-working \.graph-agent-signal[\s\S]*animation:\s*graph-agent-signal/); assert.match(graphCss, /prefers-reduced-motion[\s\S]*\.graph-node\.is-working \.graph-agent-signal[\s\S]*animation:\s*none/); assert.match(runtimeCss, /\.space-button\.is-working \.space-label::before[\s\S]*space-active-pulse[\s\S]*prefers-reduced-motion/);
   assert.match(html, /data-nav-target=["']runtime["']/);
 });
 test('all owned frontend code and styles stay below the 200-line limit', () => {
@@ -126,7 +126,7 @@ test('dashboard renders DAG nodes and native edges, preserves escaping, and sele
   const spacesRoot = new FakeNode('div', renderDocument);
   const graphRoot = new FakeNode('div', renderDocument);
   const runtime = {
-    workspaces: [{ id: 'space-1' }],
+    workspaces: [{ id: 'space-1', status: 'working' }],
     agents: [
       { paneId: 'controller-1', display: 'controller', workspaceId: 'space-1', status: 'idle', orchestration: { role: 'controller', parentPaneId: null, relation: null, task: 'root', runId: 'r1' } },
       { paneId: 'worker-1', display: '<worker>', workspaceId: 'space-1', status: 'working', orchestration: { role: 'worker', parentPaneId: 'controller-1', relation: 'delegate', task: 'ship-task', runId: 'r1' } },
@@ -142,6 +142,7 @@ test('dashboard renders DAG nodes and native edges, preserves escaping, and sele
     dispatch() {},
   };
   const view = createDashboardView({ documentRef: renderDocument, store, agentsRoot: graphRoot, spacesRoot, onSelectPane: async (paneId) => selected.push(paneId) });
+  const spaceRows = descendants(spacesRoot).filter((node) => Object.hasOwn(node.attrs, 'data-space-id')); assert.equal(spaceRows.find((node) => node.attrs['data-space-id'] === '').attrs.class, 'space-button is-selected'); assert.equal(spaceRows.find((node) => node.attrs['data-space-id'] === 'space-1').attrs.class, 'space-button is-working');
   const nodes = descendants(graphRoot).filter((node) => node.attrs['data-node-role']);
   const edges = descendants(graphRoot).filter((node) => node.name === 'line' && node.attrs['data-relation']);
   assert.equal(nodes.length, 4);
