@@ -177,8 +177,6 @@ export function renderOrchestrationGraph(documentRef, root, state = {}, options 
   graph.appendChild(controls.element);
   graph.appendChild(stage);
   if (!model.nodes.length) graph.appendChild(createGraphHelpState(documentRef, 'No agents reported for this space.'));
-  else if (model.hasUnmapped || !model.edges.length) graph.appendChild(createGraphHelpState(documentRef,
-    'DISCONNECTED: no verified parent / relation / run match. HOD never guesses edges from names or pane order.'));
   root.appendChild(graph);
   attachGraphViewport(documentRef, stage, canvases, controls, options.viewportState);
   return model;

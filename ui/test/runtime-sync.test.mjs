@@ -104,7 +104,7 @@ test('observer capabilities skip settings while legacy settings 404 remains a fa
   const sync = createRuntimeSync({ api, setTimeoutImpl: clock.setTimeout, clearTimeoutImpl: clock.clearTimeout,
     onStatus: (message, code) => statuses.push([message, code]) });
   sync.open(); sources[0].emit('open'); await flush();
-  assert.equal(settingsCalls, 0); assert.deepEqual(statuses.at(-1), ['refresh complete', 'OK']);
+  assert.equal(settingsCalls, 0); assert.deepEqual(statuses, []);
   sources[0].emit('resync', {}); await flush();
   assert.equal(settingsCalls, 1); assert.deepEqual(statuses.at(-1), ['refresh failed', 'ERR_UNAVAILABLE']);
   sync.stop();

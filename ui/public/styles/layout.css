@@ -91,6 +91,7 @@
 .statusbar-status {
   margin-inline-start: auto;
 }
+.statusbar[hidden] { display: none; }
 
 @media (max-width: 1280px) {
   .main {

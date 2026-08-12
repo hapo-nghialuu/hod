@@ -72,11 +72,7 @@ export function createRuntimeSync(options = {}) {
       }
     }
     if (stopped || requestGeneration !== refreshGeneration) return options.getState?.() ?? null;
-    if (failure) {
-      safeCall(options.onStatus, 'refresh failed', safeCode(failure, options.errorCode));
-    } else {
-      safeCall(options.onStatus, 'refresh complete', 'OK');
-    }
+    if (failure) safeCall(options.onStatus, 'refresh failed', safeCode(failure, options.errorCode));
     return options.getState?.() ?? null;
   }
 

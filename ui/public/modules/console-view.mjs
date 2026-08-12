@@ -8,7 +8,7 @@ function safeStatus(value, fallback = '—') {
 
 function stateClass(value) {
   if (value === 'connected' || value === 'OK' || value === 'success') return 'status-ok';
-  if (value === 'disconnected' || value === 'error' || /^ERR_/.test(value)) return 'status-err';
+  if (value === 'disconnected' || value === 'error' || /^ERR_|^HTTP_[45][0-9]{2}$/.test(value)) return 'status-err';
   return 'status-warn';
 }
 
@@ -62,15 +62,18 @@ function render(documentRef, state) {
     connection.classList?.toggle?.('status-ok', connectionState === 'connected');
     connection.classList?.toggle?.('status-err', connectionState === 'disconnected');
   }
+  const statusbar = documentRef?.querySelector?.('[data-region="statusbar"]');
   const message = documentRef?.querySelector?.('[data-statusbar-message]');
   const status = documentRef?.querySelector?.('[data-statusbar-status]');
   const messageText = safeStatus(state.statusbar?.message, 'hod UI console');
   const statusText = safeStatus(state.statusbar?.status === '—' ? connectionState : state.statusbar?.status);
+  const statusClass = stateClass(statusText);
+  setHidden(statusbar, statusClass !== 'status-err');
   if (message) textContent(message, messageText);
   if (status) {
     textContent(status, statusText);
     status.classList?.remove?.('status-ok', 'status-warn', 'status-err');
-    status.classList?.add?.(stateClass(statusText));
+    status.classList?.add?.(statusClass);
   }
 }
 

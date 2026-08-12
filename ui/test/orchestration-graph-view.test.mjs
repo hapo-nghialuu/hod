@@ -160,6 +160,7 @@ test('CSP-safe SVG canvases keep unmapped nodes distinct without inline styles',
   assert.match(visibleText(root), /\[COORDINATOR\] \[CLAUDE CODE\]/);
   assert.match(visibleText(root), /\[WORKER\] \[CODEX\]/);
   assert.match(visibleText(root), /\[UNMAPPED\] \[UNKNOWN\]/);
+  assert.doesNotMatch(visibleText(root), /DISCONNECTED/);
   const avatars = rendered.filter((node) => node.name === 'svg' && node.attrs.class === 'graph-agent-avatar');
   assert.equal(avatars.length, 8);
   assert.ok(avatars.every((node) => node.attrs.viewBox === '0 0 48 48' && node.attrs['aria-hidden'] === 'true'));
