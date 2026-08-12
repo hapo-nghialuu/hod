@@ -1,3 +1,5 @@
+import { normalizeOrchestrationMetadata } from './orchestration-metadata.mjs';
+
 export const CONNECTION_STATES = Object.freeze(['disconnected', 'connecting', 'connected', 'reconnecting']);
 export const AGENT_STATUSES = Object.freeze(['idle', 'working', 'blocked', 'done', 'unknown']);
 
@@ -143,6 +145,7 @@ export function normalizeSnapshot(input, connection) {
       title: optionalText(title),
       focused: boolean(field(item, 'focused')),
       revision: integer(field(item, 'revision')),
+      orchestration: normalizeOrchestrationMetadata(item.tokens),
       _workspaceOrder: workspaceOrder.get(workspaceId),
       _tabNumber: tab.number,
     };

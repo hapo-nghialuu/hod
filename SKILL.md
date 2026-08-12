@@ -43,6 +43,69 @@ Installed leaf help is the only command authority. Run `herdr agent --help` and 
 
 Use explicit pane IDs or unique live agent names, parsed from JSON with `jq -e` — never predicted from examples, focus, pane order, or sidebar position. `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` identify the calling context; IDs are opaque, stable, and never reused. Prefer `--current` only for the calling pane and `--no-focus` for background work.
 
+## HOD UI topology metadata
+
+The HOD UI topology is display-only and best-effort. Before the first report,
+inspect the exact `herdr pane report-metadata --help` leaf and use this path
+only when it exposes `--source`, `--token`, and `--ttl-ms`. If an older Herdr
+does not expose that leaf, record `HOD topology metadata unavailable; UI
+topology may be missing` and continue the main orchestration unchanged. A
+metadata error never blocks split, start, prompt, redirect, wait, or harvest.
+
+For supported Herdr, report the controller pane and every child pane with
+`--source hod` and a finite TTL (the reference recipe uses `3600000` ms):
+
+Herdr 0.8 help can render options before `PANE_ID`; follow the installed
+parser and place the pane ID immediately after `report-metadata` as shown.
+This recipe correction does not change the public `hod` CLI.
+
+```bash
+metadata_args=(
+  herdr pane report-metadata "$pane_id"
+  --source hod
+  --ttl-ms 3600000
+  --token "hod_role=$role"
+  --token "hod_task=$task_label"
+  --token "hod_run=$run_id"
+)
+if [[ -n "$parent_pane_id" ]]; then
+  metadata_args+=(--token "hod_parent=$parent_pane_id")
+  metadata_args+=(--token "hod_relation=$relation")
+fi
+if ! "${metadata_args[@]}"; then
+  printf '%s\n' 'HOD topology metadata report failed; UI topology may be stale.' >&2
+fi
+```
+
+Only these token names are allowed: `hod_role`, `hod_parent`,
+`hod_relation`, `hod_task`, and `hod_run`. `hod_role` is one of `controller`,
+`worker`, `advisor`, `reviewer`, or `tester`; `hod_relation` is one of
+`delegate`, `consult`, or `verify`. The root controller omits `hod_parent` and
+`hod_relation`; a child always includes both. A controller that is itself a
+child may include them only when its direct coordinator pane ID is known.
+
+`hod_parent` must be the real pane ID of the direct coordinator, captured from
+the current `HERDR_PANE_ID` or a parsed Herdr result. Never derive it from an
+agent name, pane order, tab title, or focus. Map a normal worker to
+`worker`/`delegate`, an advisor to `advisor`/`consult`, and a reviewer or tester
+to its matching role/`verify`.
+
+`hod_task` is a short, sanitized label chosen independently of prompt text,
+transcripts, pane output, secrets, tokens, or credentials: keep a slug of at
+most 48 characters matching `[a-z0-9._-]`, replace unsafe input, and use
+`task` when in doubt.
+`hod_run` is a short non-secret identifier stable for this orchestration run.
+Do not put any other data in metadata, including prompt fragments or worker
+claims.
+
+Attach metadata at the existing lifecycle boundaries: report the controller
+before dispatch; after `pane split`, parse and report the returned child pane
+ID before `agent start`; report that same pane again after a successful start;
+on redirect, resolve the target's actual pane ID and refresh its same parent,
+role, relation, run, and new short task label; on harvest, refresh the settled
+pane using its actual ID before reading evidence. Do not reparent a pane on a
+redirect or harvest, and let the finite TTL expire naturally.
+
 ## Workflow
 
 1. Confirm explicit user authority, the Herdr environment, and a complete supported command family.

@@ -41,11 +41,62 @@ test('normalization sorts and exposes only the public redacted shape', () => {
   assert.deepEqual(normalized.agents.map(({ paneId }) => paneId), ['p-z', 'p-a']);
   assert.deepEqual(normalized.agents[0], {
     paneId: 'p-z', workspaceId: 'w-z', tabId: 't-z', name: 'Zed', display: 'Claude',
-    status: 'working', title: 'z title', focused: true, revision: 9,
+    status: 'working', title: 'z title', focused: true, revision: 9, orchestration: null,
   });
   for (const forbidden of ['cwd', 'foreground_cwd', 'agent_session', 'tokens', 'terminal_id', 'worktree']) {
     assert.equal(JSON.stringify(normalized).includes(forbidden), false, forbidden);
   }
+});
+
+test('normalization maps only the HOD orchestration token allowlist', () => {
+  const input = snapshot({ includeSecondPane: false });
+  input.agents[0].tokens = {
+    hod_role: ' worker ',
+    hod_parent: 'parent-pane-1',
+    hod_relation: ' delegate ',
+    hod_task: 'ship-runtime-metadata',
+    hod_run: 'run-20260812-01',
+    hod_secret: 'must-not-cross-boundary',
+    arbitrary: 'also-must-not-cross-boundary',
+  };
+
+  const normalized = normalizeSnapshot(input);
+  assert.deepEqual(normalized.agents[0].orchestration, {
+    role: 'worker', parentPaneId: 'parent-pane-1', relation: 'delegate',
+    task: 'ship-runtime-metadata', runId: 'run-20260812-01',
+  });
+  assert.equal(JSON.stringify(normalized).includes('hod_secret'), false);
+  assert.equal(JSON.stringify(normalized).includes('must-not-cross-boundary'), false);
+  assert.equal(JSON.stringify(normalized).includes('arbitrary'), false);
+});
+
+test('normalization ignores source-shaped metadata outside instrumentation tokens', () => {
+  const input = snapshot({ includeSecondPane: false });
+  input.agents[0].metadata = {
+    source: 'other',
+    hod_role: 'reviewer',
+    hod_task: 'wrong source must not be consumed',
+  };
+
+  // session.snapshot exposes merged agent.tokens without provenance. Source
+  // ownership is an instrumentation contract, not a field this normalizer can verify.
+  assert.equal(normalizeSnapshot(input).agents[0].orchestration, null);
+});
+
+test('malformed orchestration values are safely nulled without breaking snapshots', () => {
+  const input = snapshot({ includeSecondPane: false });
+  input.agents[0].tokens = {
+    hod_role: 'worker',
+    hod_parent: 42,
+    hod_relation: 'delegate-now',
+    hod_task: 'contains\u0000control',
+    hod_run: 'run with spaces',
+  };
+
+  assert.doesNotThrow(() => normalizeSnapshot(input));
+  assert.deepEqual(normalizeSnapshot(input).agents[0].orchestration, {
+    role: 'worker', parentPaneId: null, relation: null, task: null, runId: null,
+  });
 });
 
 test('replacement is authoritative, clears missing selection, and emits clones', () => {

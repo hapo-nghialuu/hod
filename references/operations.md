@@ -288,6 +288,83 @@ ASK_USER`. Never use a dangerous permission bypass or an approval loop. For
 Codex, use only sandbox and approval flags confirmed by installed help; a
 sandbox failure is evidence to inspect, not permission to widen capability.
 
+## Report HOD UI topology metadata
+
+This report is optional display metadata, not a new orchestration control
+plane. Probe the exact leaf once before dispatch:
+
+```bash
+if report_metadata_help=$(herdr pane report-metadata --help 2>&1) &&
+  printf '%s\n' "$report_metadata_help" | grep -q -- '--source' &&
+  printf '%s\n' "$report_metadata_help" | grep -q -- '--token' &&
+  printf '%s\n' "$report_metadata_help" | grep -q -- '--ttl-ms'; then
+  topology_metadata_supported=true
+else
+  topology_metadata_supported=false
+  printf '%s\n' \
+    'HOD topology metadata unavailable; UI topology may be missing.' >&2
+fi
+```
+
+Herdr 0.8 help can render options before `PANE_ID`; follow the installed
+parser and place the pane ID immediately after `report-metadata` as shown.
+This recipe correction does not change the public `hod` CLI.
+
+When supported, use one finite TTL for the run and only the five approved
+token names. The helper below is a recipe for the controller's existing shell
+flow; it must not become new logic in the `hod` CLI:
+
+```bash
+report_hod_topology() {
+  local pane_id=$1
+  local role=$2
+  local parent_pane_id=$3
+  local relation=$4
+  local task_label=$5
+  local run_id=$6
+  local report_args=(
+    herdr pane report-metadata "$pane_id"
+    --source hod
+    --ttl-ms 3600000
+    --token "hod_role=$role"
+    --token "hod_task=$task_label"
+    --token "hod_run=$run_id"
+  )
+
+  if [[ -n "$parent_pane_id" ]]; then
+    report_args+=(--token "hod_parent=$parent_pane_id")
+    report_args+=(--token "hod_relation=$relation")
+  fi
+  if ! "${report_args[@]}"; then
+    printf '%s\n' \
+      'HOD topology metadata report failed; UI topology may be stale.' >&2
+  fi
+  return 0
+}
+```
+
+For the root controller call this with its real `HERDR_PANE_ID` and omit the
+parent and relation. For each child, capture the direct coordinator's pane ID
+before splitting, parse the new `.result.pane.pane_id`, and pass that returned
+ID as `pane_id`; never use an agent name or guessed pane position as
+`hod_parent`. Use `worker`/`delegate` for a normal worker,
+`advisor`/`consult` for an advisor, and `reviewer` or `tester`/`verify` for
+their corresponding child.
+
+The task label must be a short, pre-sanitized slug of at most 48 characters
+matching `[a-z0-9._-]` from a task title, not the prompt, transcript, pane
+output, secret, token, or credential. The run ID is a short non-secret value
+shared by this run. If either value cannot be made safe, use a neutral fixed
+label; never forward arbitrary text.
+
+Run the helper at the existing lifecycle points: controller pre-dispatch;
+immediately after split and before start; after a successful start; after a
+redirect has resolved and delivered the target prompt; and during harvest,
+after the target settles and before evidence is read. Redirect and harvest
+reuse the same real parent, role, relation, and run; they only refresh the
+finite TTL and, when needed, the short task label. If a report fails, retain
+the failure as a UI-topology warning and continue the underlying lifecycle.
+
 ## Start a worker
 
 ```bash
