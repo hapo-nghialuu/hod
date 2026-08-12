@@ -11,7 +11,7 @@ import {
 } from './transcript-one-shot-clients.mjs';
 
 const read = (paneId, text, revision) => ({ type: 'pane_read', read: {
-  pane_id: paneId, workspace_id: 'w', tab_id: 't', source: 'recent_unwrapped', format: 'text',
+  pane_id: paneId, workspace_id: 'w', tab_id: 't', source: 'recent', format: 'ansi',
   text, revision, truncated: false,
 } });
 const semantic = ({
@@ -39,6 +39,9 @@ const assertPanePolling = (clients) => {
   for (const client of clients) {
     assert.deepEqual(methods(client), ['pane.read']);
     assert.equal(client.requests.length, 1);
+    assert.deepEqual(client.requests[0].params, {
+      pane_id: client.requests[0].params.pane_id, source: 'recent', format: 'ansi', strip_ansi: false,
+    });
   }
 };
 

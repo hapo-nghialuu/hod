@@ -72,15 +72,15 @@ test('runtime-only capabilities hide and block Settings while legacy state stays
   const app = consoleElement(); const spaces = consoleElement(); const agents = consoleElement();
   const transcript = consoleElement(); const settingsPane = consoleElement(); const runtimeLink = consoleElement({ 'data-nav-target': 'runtime' });
   const settingsLink = consoleElement({ 'data-nav-target': 'settings' }); const connection = consoleElement();
-  const message = consoleElement(); const status = consoleElement();
+  const message = consoleElement(); const status = consoleElement(); const statusbar = consoleElement();
   const documentRef = {
     getElementById(id) { return { app, 'view-spaces': spaces, 'view-agents': agents, 'view-transcript': transcript,
       'view-settings': settingsPane, 'connection-status': connection }[id]; },
     querySelectorAll() { return [runtimeLink, settingsLink]; },
-    querySelector(selector) { return selector.includes('message') ? message : status; },
+    querySelector(selector) { if (selector.includes('data-region')) return statusbar; return selector.includes('message') ? message : status; },
   };
   const legacyStore = createStore(); const legacyView = createConsoleView({ documentRef, store: legacyStore });
-  assert.equal(settingsLink.hidden, false); legacyView.destroy();
+  assert.equal(settingsLink.hidden, false); assert.equal(statusbar.hidden, true); legacyStore.dispatch({ type: ACTIONS.STATUSBAR_SET, statusbar: { message: 'failed', status: 'ERR_TEST' } }); assert.equal(statusbar.hidden, false); legacyStore.dispatch({ type: ACTIONS.STATUSBAR_SET, statusbar: { message: 'complete', status: 'OK' } }); assert.equal(statusbar.hidden, true); legacyView.destroy();
   const store = createStore();
   store.dispatch({ type: ACTIONS.STATE_REPLACE, state: { capabilities: { settings: false }, agents: [] } });
   const view = createConsoleView({ documentRef, store });
@@ -102,7 +102,6 @@ test('store normalizes nested and partial capability shapes without weakening fa
 test('authoritative snapshots and reconnects clear stale runtime data but keep settings', () => {
   const store = createStore();
   store.dispatch({ type: ACTIONS.VIEW_SET, view: 'settings' });
-  store.dispatch({ type: ACTIONS.FOLLOW_TAIL_SET, followTail: false });
   store.dispatch({ type: ACTIONS.SETTINGS_REPLACE, settings: { values: { enabled: true } } });
   store.dispatch({
     type: ACTIONS.STATE_REPLACE,
@@ -119,7 +118,7 @@ test('authoritative snapshots and reconnects clear stale runtime data but keep s
   assert.deepEqual(state.settings, { values: { enabled: true } });
   assert.equal(state.connection.errorCode, 'ERR_SOCKET');
   assert.equal(state.view, 'settings');
-  assert.equal(state.followTail, false);
+  assert.equal(Object.hasOwn(state, 'followTail'), false);
 
   store.dispatch({ type: ACTIONS.CONNECTION, connection: { status: 'disconnected', error: 'raw secret' } });
   state = store.getState();

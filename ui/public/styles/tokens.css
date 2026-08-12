@@ -5,6 +5,7 @@
   --color-surface: #1b1a19;
   --color-surface-raised: #242321;
   --color-surface-sunken: #0e0e0d;
+  --color-terminal-background: #00343d;
   --color-foreground: #FAF9F5;
   --color-foreground-muted: #b7b3a9;
   --color-foreground-faint: #7d7a71;
@@ -30,6 +31,7 @@
   --bg: var(--color-background);
   --bg-raised: var(--color-surface);
   --bg-sunken: var(--color-surface-sunken);
+  --terminal-bg: var(--color-terminal-background);
   --fg: var(--color-foreground);
   --fg-muted: var(--color-foreground-muted);
   --fg-faint: var(--color-foreground-faint);

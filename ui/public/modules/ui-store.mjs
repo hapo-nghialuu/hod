@@ -3,7 +3,7 @@ export const ACTIONS = Object.freeze({
   STATE_REPLACE: 'runtime/replace', TRANSCRIPT_REPLACE: 'transcript/replace', TRANSCRIPT_PUSH: 'transcript/push',
   TRANSCRIPT_SELECT: 'transcript/select', TRANSCRIPT_ERROR: 'transcript/error', TRANSCRIPT_CLEAR: 'transcript/clear',
   SETTINGS_REPLACE: 'settings/replace', VIEW_SET: 'view/set',
-  WORKSPACE_SET: 'workspace/set', FOLLOW_TAIL_SET: 'transcript/follow-tail',
+  WORKSPACE_SET: 'workspace/set',
   STATUSBAR_SET: 'statusbar/set',
 });
 
@@ -47,7 +47,7 @@ export function createInitialState(overrides = {}) {
     runtime: null, transcript: null, settings: null,
     connection: { status: 'connecting', errorCode: null },
     capabilities: { ...DEFAULT_CAPABILITIES }, view: 'runtime', selectedWorkspace: null,
-    followTail: true, statusbar: { message: 'hod UI console', status: '—' }, ...clone(overrides),
+    statusbar: { message: 'hod UI console', status: '—' }, ...clone(overrides),
   };
   output.capabilities = normalizeCapabilities(overrides);
   if (!output.capabilities.settings) output.view = 'runtime';
@@ -162,10 +162,6 @@ export function reducer(state = initialState, action = {}) {
   if (type === ACTIONS.WORKSPACE_SET) {
     const workspace = payloadOf(action, 'selectedWorkspace');
     return frozen({ ...current, selectedWorkspace: workspace == null ? null : String(workspace) });
-  }
-  if (type === ACTIONS.FOLLOW_TAIL_SET) {
-    const followTail = payloadOf(action, 'followTail');
-    return typeof followTail === 'boolean' ? frozen({ ...current, followTail }) : current;
   }
   if (type === ACTIONS.STATUSBAR_SET) {
     const statusbar = payloadOf(action, 'statusbar') ?? {};

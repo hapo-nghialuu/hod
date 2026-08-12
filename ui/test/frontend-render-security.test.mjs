@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createDashboardView } from '../public/modules/dashboard-view.mjs';
-import { createTranscriptView } from '../public/modules/transcript-view.mjs';
+import { ansiSegments, createTranscriptView } from '../public/modules/transcript-view.mjs';
 import { ACTIONS, createStore } from '../public/modules/ui-store.mjs';
 const uiRoot = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const publicRoot = join(uiRoot, 'public');
@@ -26,6 +26,7 @@ class FakeNode {
 const renderDocument = {
   createElement(name) { return new FakeNode(name, renderDocument); },
   createTextNode(text) { return { nodeType: 3, ownerDocument: renderDocument, textContent: String(text) }; },
+  styleSheets: [{ href: 'http://127.0.0.1/styles/runtime-view.css', cssRules: [], insertRule(rule) { this.cssRules.push(rule); } }],
 };
 function descendants(node, result = []) {
   for (const child of node.children ?? []) {
@@ -83,7 +84,7 @@ test('compact three-pane layout adapts on medium/mobile and graph motion is redu
   const layoutCss = readFileSync(layoutPath, 'utf8');
   const graphCss = readFileSync(join(publicRoot, 'styles', 'orchestration-graph.css'), 'utf8'); const runtimeCss = readFileSync(join(publicRoot, 'styles', 'runtime-view.css'), 'utf8');
   assert.doesNotMatch(html, /<aside\b[^>]*\bclass=["']rail/);
-  assert.doesNotMatch(html, /data-action=["']refresh/);
+  assert.doesNotMatch(html, /data-action=["']refresh/); assert.match(html, /<footer\b[^>]*class=["']statusbar["'][^>]*\bhidden\b/); assert.match(layoutCss, /\.statusbar\[hidden\]\s*\{[^}]*display:\s*none/);
   assert.doesNotMatch(layoutCss, /\.rail\b/);
   assert.match(layoutCss, /\.main\s*\{[\s\S]*grid-template-columns:/);
   assert.match(layoutCss, /@media\s*\(max-width:\s*1040px\)[\s\S]*\.app\s*\{[^}]*overflow:\s*auto[\s\S]*grid-template-rows:/); assert.match(layoutCss, /@media\s*\(max-width:\s*760px\)[\s\S]*\.main\s*\{[^}]*flex-direction:\s*column/);
@@ -184,16 +185,13 @@ test('transcript renders loading/error states without an empty success pre', () 
   view.destroy();
 });
 
-test('transcript follow owns inner scrollback and preserves it while off', () => {
-  const root = new FakeNode('div', renderDocument); const store = createStore(); const view = createTranscriptView({ documentRef: renderDocument, store, root });
-  const transcript = (revision) => ({ paneId: 'p1', text: 'line\n'.repeat(300), revision });
+test('ANSI transcript stays safe and always owns the newest inner scrollback', () => {
+  const root = new FakeNode('div', renderDocument); const store = createStore(); const view = createTranscriptView({ documentRef: renderDocument, store, root }); assert.ok(ansiSegments('\u001b[31ma\u001b[32mb'.repeat(20_001)).length <= 20_000);
+  const transcript = (revision) => ({ paneId: 'p1', text: `\u001b]52;c;secret\u0007\u001bPprivate\u001b\\\u001b[1;38;2;217;119;87mline ${revision}\u001b[0m <script>\r\n`.repeat(300), revision });
   store.dispatch({ type: ACTIONS.TRANSCRIPT_SELECT, paneId: 'p1', requestId: 1 });
   store.dispatch({ type: ACTIONS.TRANSCRIPT_REPLACE, requestId: 1, transcript: transcript(1) });
   let pre = descendants(root).find((node) => node.name === 'pre');
-  assert.equal(root.scrollHeight - root.clientHeight, 0); assert.equal(root.scrollTop, 0); assert.equal(pre.scrollHeight - pre.clientHeight, 850); assert.equal(pre.scrollTop, 850);
+  assert.equal(root.scrollHeight - root.clientHeight, 0); assert.equal(root.scrollTop, 0); assert.equal(pre.scrollHeight - pre.clientHeight, 850); assert.equal(pre.scrollTop, 850); assert.equal(pre.attrs.role, 'region'); assert.equal(visibleText(pre).includes('\u001b'), false); assert.equal(visibleText(pre).includes('secret'), false); assert.equal(visibleText(pre).includes('private'), false); assert.equal(visibleText(pre).includes('<script>'), true); assert.equal(descendants(root).some((node) => node.attrs['data-action'] === 'follow-toggle'), false); assert.match(descendants(pre).find((node) => node.name === 'span').attrs.class, /ansi-bold ansi-fg-d97757/); assert.match(renderDocument.styleSheets[0].cssRules.join(''), /\.ansi-fg-d97757\{color:#d97757\}/);
   root.scrollTop = root.scrollHeight; assert.equal(root.scrollTop, 0, 'legacy root-only scrolling cannot move the inner owner');
-  store.dispatch({ type: ACTIONS.TRANSCRIPT_PUSH, requestId: 1, transcript: transcript(2) }); pre = descendants(root).find((node) => node.name === 'pre'); assert.equal(pre.scrollTop, 850); pre.scrollTop = 321;
-  store.dispatch({ type: ACTIONS.FOLLOW_TAIL_SET, followTail: false }); pre = descendants(root).find((node) => node.name === 'pre'); assert.equal(pre.scrollTop, 321);
-  store.dispatch({ type: ACTIONS.TRANSCRIPT_PUSH, requestId: 1, transcript: transcript(3) }); pre = descendants(root).find((node) => node.name === 'pre'); assert.equal(pre.scrollTop, 321);
-  store.dispatch({ type: ACTIONS.FOLLOW_TAIL_SET, followTail: true }); pre = descendants(root).find((node) => node.name === 'pre'); assert.equal(pre.scrollTop, 850); view.destroy();
+  pre.scrollTop = 321; store.dispatch({ type: ACTIONS.TRANSCRIPT_PUSH, requestId: 1, transcript: transcript(2) }); pre = descendants(root).find((node) => node.name === 'pre'); assert.equal(pre.scrollTop, 850); view.destroy();
 });

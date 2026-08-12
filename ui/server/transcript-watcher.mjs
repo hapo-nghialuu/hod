@@ -7,6 +7,7 @@ import {
 } from './transcript-text-limit.mjs';
 export const DEFAULT_WAIT_TIMEOUT_MS = 60_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = DEFAULT_WAIT_TIMEOUT_MS + 5_000;
+const PANE_READ_REQUEST = Object.freeze({ source: 'recent', format: 'ansi', strip_ansi: false });
 function selectionError(selection) {
   return !selection || typeof selection !== 'object'
     || typeof selection.socketPath !== 'string' || selection.socketPath.trim() === ''
@@ -18,6 +19,9 @@ function sameTranscriptSnapshot(left, right) {
     && left.revision === right.revision && left.truncated === right.truncated
     && left.gap === right.gap && left.reconnecting === right.reconnecting
     && left.bridgeTruncated === right.bridgeTruncated;
+}
+function shouldRetryPolling(error) {
+  return isTranscriptTimeout(error) || stableTranscriptError(error) === 'ERR_SOCKET_DISCONNECTED';
 }
 export class TranscriptWatcher extends EventEmitter {
   constructor({
@@ -104,9 +108,7 @@ export class TranscriptWatcher extends EventEmitter {
     if (!selection || !this._isCurrent(generation)) return null;
     const response = await this._request(generation, 'pane.read', {
       pane_id: selection.paneId,
-      source: 'recent_unwrapped',
-      format: 'text',
-      strip_ansi: true,
+      ...PANE_READ_REQUEST,
     });
     if (!this._isCurrent(generation)) return null;
     const read = validatePaneRead(response, selection.paneId);
@@ -140,9 +142,7 @@ export class TranscriptWatcher extends EventEmitter {
     } catch (error) {
       if (!this._isCurrent(generation)) return;
       this._report(error, generation);
-      if (!isTranscriptTimeout(error) && this._safeError(error).code !== 'ERR_SOCKET_DISCONNECTED') {
-        return;
-      }
+      if (!shouldRetryPolling(error)) return;
       const delay = this._retryDelay;
       this._retryDelay = Math.min(this._retryMaxMs, Math.max(this._retryMinMs, delay * 2));
       this._schedule(generation, delay);

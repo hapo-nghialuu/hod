@@ -5,7 +5,7 @@ import { TranscriptWatcher } from '../server/transcript-watcher.mjs';
 import { ManualTimers, OneShotTranscriptClient } from './transcript-one-shot-clients.mjs';
 
 const read = (text, revision) => ({ type: 'pane_read', read: {
-  pane_id: 'p1', workspace_id: 'w', tab_id: 't', source: 'recent_unwrapped', format: 'text',
+  pane_id: 'p1', workspace_id: 'w', tab_id: 't', source: 'recent', format: 'ansi',
   text, revision, truncated: false,
 } });
 const semantic = ({

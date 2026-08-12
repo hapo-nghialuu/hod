@@ -1,4 +1,6 @@
 export const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;
+const PANE_READ_SOURCE = 'recent';
+const PANE_READ_FORMAT = 'ansi';
 
 export class TranscriptWatcherError extends Error {
   constructor(code) {
@@ -29,9 +31,9 @@ export function validatePaneRead(response, paneId) {
   if (!Number.isSafeInteger(read.revision) || read.revision < 0) {
     throw new TranscriptWatcherError('ERR_PANE_READ_REVISION');
   }
-  if (typeof read.truncated !== 'boolean'
-    || (read.source !== undefined && read.source !== 'recent_unwrapped')
-    || (read.format !== undefined && read.format !== 'text')) {
+  const validSource = read.source === undefined || read.source === PANE_READ_SOURCE;
+  const validFormat = read.format === undefined || read.format === PANE_READ_FORMAT;
+  if (typeof read.truncated !== 'boolean' || !validSource || !validFormat) {
     throw new TranscriptWatcherError('ERR_PANE_READ_INVALID');
   }
   return read;
