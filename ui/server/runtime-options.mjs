@@ -38,6 +38,12 @@ function missingValueError(flag) {
   return err;
 }
 
+function runtimeOnlyProjectError() {
+  const err = new Error('--project is not supported in runtime-only mode');
+  err.code = 'ERR_USAGE';
+  return err;
+}
+
 // Ensure a path is a directory. Realpath-free on purpose: the launcher is the
 // single place that canonicalizes, so tests can pass a fake tree.
 function assertExistingDirectory(path) {
@@ -63,6 +69,7 @@ function assertExistingDirectory(path) {
  */
 export function parseRuntimeOptions(argv = [], env = {}) {
   const seen = new Set();
+  const runtimeOnly = argv.includes('--runtime-only');
   let project;
   let port = DEFAULT_PORT;
   let open = true;
@@ -80,7 +87,11 @@ export function parseRuntimeOptions(argv = [], env = {}) {
 
   while (i < argv.length) {
     const arg = argv[i];
-    if (arg === '--project') {
+    if (arg === '--runtime-only') {
+      if (seen.has('--runtime-only')) throw duplicateFlagError('--runtime-only');
+      seen.add('--runtime-only');
+    } else if (arg === '--project') {
+      if (runtimeOnly) throw runtimeOnlyProjectError();
       if (seen.has('--project')) throw duplicateFlagError('--project');
       seen.add('--project');
       project = takeValue('--project');
@@ -113,5 +124,6 @@ export function parseRuntimeOptions(argv = [], env = {}) {
     hodBin = env.HOD_BIN;
   }
 
-  return { project, port, open, hodBin };
+  return runtimeOnly ? { project, port, open, hodBin, runtimeOnly: true }
+    : { project, port, open, hodBin };
 }

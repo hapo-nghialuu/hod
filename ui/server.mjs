@@ -1,11 +1,13 @@
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { parseRuntimeOptions } from './server/runtime-options.mjs';
 import { resolveApplicationPaths } from './server/application-paths.mjs';
 import { openBrowser } from './server/browser-launcher.mjs';
 import { createLiveConsoleRuntime } from './server/live-console-runtime.mjs';
+import { createGlobalObserverRuntime } from './server/global-observer-runtime.mjs';
 import { createHttpServer } from './server/http-server.mjs';
 import { SessionAuth } from './server/session-auth.mjs';
 
@@ -62,6 +64,14 @@ function removeSignal(processRef, signal, handler) {
 
 export function isDirectEntry(argv = process.argv, entryFile = ENTRY_FILE) { return directEntry(argv, entryFile); }
 
+function runtimeOnlyPaths({ entryFile, env, herdrBin, hodBin }) {
+  return Object.freeze({
+    publicRoot: join(dirname(entryFile), 'public'),
+    herdrBin: herdrBin ?? env?.HERDR_BIN ?? 'herdr',
+    ...(hodBin === undefined ? {} : { hodBin }),
+  });
+}
+
 export async function startHodUi(options = {}) {
   const processRef = options.process ?? process;
   const env = options.env ?? processRef.env ?? process.env;
@@ -69,30 +79,44 @@ export async function startHodUi(options = {}) {
   let parsed;
   try { parsed = (options.parseOptions ?? parseRuntimeOptions)(argv, env); }
   catch (error) { throw safeError(error, 'ERR_USAGE'); }
+  const runtimeOnly = parsed.runtimeOnly === true;
+  const entryFile = options.entryFile ?? ENTRY_FILE;
   let paths;
   try {
-    paths = await (options.resolvePaths ?? resolveApplicationPaths)({
-      ...parsed, env, cwd: options.cwd ?? processRef.cwd?.() ?? process.cwd(),
-      entryFile: options.entryFile ?? ENTRY_FILE,
-      directSourceInvocation: options.directSourceInvocation ?? directEntry(processRef.argv, options.entryFile ?? ENTRY_FILE),
-      herdrBin: options.herdrBin,
-    });
+    paths = runtimeOnly
+      ? await (options.resolveRuntimePaths ?? runtimeOnlyPaths)({
+        entryFile, env, herdrBin: options.herdrBin, hodBin: parsed.hodBin,
+      })
+      : await (options.resolvePaths ?? resolveApplicationPaths)({
+        ...parsed, env, cwd: options.cwd ?? processRef.cwd?.() ?? process.cwd(),
+        entryFile,
+        directSourceInvocation: options.directSourceInvocation ?? directEntry(processRef.argv, entryFile),
+        herdrBin: options.herdrBin,
+      });
   } catch (error) { throw safeError(error); }
-  if (typeof paths.hodBin !== 'string' || paths.hodBin === '') throw new UiStartupError('ERR_HOD_BIN');
+  if (!runtimeOnly && (typeof paths.hodBin !== 'string' || paths.hodBin === '')) {
+    throw new UiStartupError('ERR_HOD_BIN');
+  }
   const randomBytes = options.randomBytes ?? nodeRandomBytes;
   const bootstrapToken = randomBootstrapToken(randomBytes);
-  const runtimeFactory = options.createRuntime ?? createLiveConsoleRuntime;
+  const runtimeFactory = runtimeOnly
+    ? (options.createRuntimeOnly ?? createGlobalObserverRuntime)
+    : (options.createRuntime ?? createLiveConsoleRuntime);
   const httpFactory = options.createHttpServer ?? createHttpServer;
   let runtime;
   let httpServer;
   let signals = [];
   try {
-    runtime = options.runtime ?? runtimeFactory({
-      projectRoot: paths.projectRoot, templatesRoot: paths.templatesRoot, configPath: paths.configPath,
-      hodBin: paths.hodBin, herdrBin: paths.herdrBin,
-      hodRoleSettingsOptions: { projectRoot: paths.projectRoot, templatesRoot: paths.templatesRoot, hodBin: paths.hodBin },
-      herdrConfigSettingsOptions: { configPath: paths.configPath, herdrBin: paths.herdrBin, env },
-    });
+    runtime = options.runtime ?? (runtimeOnly
+      ? runtimeFactory({
+        runtimeOnly: true, env, herdrBin: paths.herdrBin, publicRoot: paths.publicRoot,
+      })
+      : runtimeFactory({
+        projectRoot: paths.projectRoot, templatesRoot: paths.templatesRoot, configPath: paths.configPath,
+        hodBin: paths.hodBin, herdrBin: paths.herdrBin,
+        hodRoleSettingsOptions: { projectRoot: paths.projectRoot, templatesRoot: paths.templatesRoot, hodBin: paths.hodBin },
+        herdrConfigSettingsOptions: { configPath: paths.configPath, herdrBin: paths.herdrBin, env },
+      }));
     const auth = options.sessionAuth ?? (options.createSessionAuth
       ? options.createSessionAuth({ bootstrapToken, randomBytes })
       : new SessionAuth({ bootstrapToken, randomBytes }));

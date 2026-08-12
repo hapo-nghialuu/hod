@@ -138,7 +138,7 @@ export function createHttpServer(options = {}) {
         }
       }
       try {
-        const result = await handleApi({ method, path: request.url, body });
+        const result = await handleApi.call(controller, { method, path: request.url, body });
         if (!result) { sendError(response, method, 404, 'ERR_API_NOT_FOUND'); return; }
         if (!Number.isInteger(result.status) || result.status < 100 || result.status > 599) {
           sendError(response, method, 500, 'ERR_API'); return;

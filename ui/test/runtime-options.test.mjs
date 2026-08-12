@@ -106,6 +106,30 @@ test('--hod-bin accepts a value and falls back to env HOD_BIN', () => {
   assert.equal(parseRuntimeOptions(['--hod-bin', '/x'], { HOD_BIN: '/env' }).hodBin, '/x');
 });
 
+test('runtime-only parsing accepts only the internal selector plus read-only launch options', () => {
+  assert.deepEqual(parseRuntimeOptions([
+    '--runtime-only', '--port', '4317', '--no-open', '--hod-bin', '/x/hod',
+  ]), {
+    project: undefined, port: 4317, open: false, hodBin: '/x/hod', runtimeOnly: true,
+  });
+  assert.throws(
+    () => parseRuntimeOptions(['--runtime-only', '--runtime-only']),
+    (err) => err.code === 'ERR_USAGE' && /duplicate option/.test(err.message),
+  );
+});
+
+test('runtime-only rejects --project before validating or reading its value', () => {
+  for (const argv of [
+    ['--runtime-only', '--project', '/path/that/does/not/exist'],
+    ['--project', '/path/that/does/not/exist', '--runtime-only'],
+  ]) {
+    assert.throws(
+      () => parseRuntimeOptions(argv),
+      (err) => err.code === 'ERR_USAGE' && /not supported in runtime-only/.test(err.message),
+    );
+  }
+});
+
 test('unknown flag rejects with the flag named', () => {
   assert.throws(
     () => parseRuntimeOptions(['--bogus']),

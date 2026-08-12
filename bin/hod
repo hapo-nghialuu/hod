@@ -16,6 +16,7 @@ Usage:
   hod settings list
   hod settings install [--project <path>] [--role <name>] [--force]
   hod ui [--project <path>] [--port <0-65535>] [--no-open]
+  hod start [--port <0-65535>] [--no-open]
   hod version
   hod help
 
@@ -31,6 +32,7 @@ Subcommands:
   settings    Copy per-role Claude Code settings profiles into a project
               (list shows the roles; install writes .claude/settings.<role>.json)
   ui          Launch the local HOD web console (Node.js 20+)
+  start       Launch the foreground, loopback-only runtime observer (Node.js 20+)
   version     Print the hod version
   help        Show this help
 
@@ -941,7 +943,9 @@ resolve_node_20() {
   printf '%s\n' "$node_bin"
 }
 
-cmd_ui() {
+launch_ui() {
+  local runtime_only=$1
+  shift
   local ui_entry node_bin hod_bin
   local -a ui_argv
 
@@ -959,7 +963,31 @@ cmd_ui() {
   # leading dashes remain data, never shell syntax; exec preserves status and
   # signal delivery after validation succeeds.
   ui_argv=(--hod-bin "$hod_bin" "$@")
+  if [[ "$runtime_only" == true ]]; then
+    ui_argv+=(--runtime-only)
+  fi
   exec "$node_bin" "$ui_entry" "${ui_argv[@]}"
+}
+
+cmd_ui() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == '--runtime-only' ]] || continue
+    usage_error "ui does not accept --runtime-only"
+  done
+  launch_ui false "$@"
+}
+
+cmd_start() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == '--project' ]] || continue
+    usage_error "start does not accept --project"
+  done
+
+  # Keep the existing UI launcher, Node gate, entry safety, and signal path;
+  # the private launcher boundary appends the internal runtime-only selector.
+  launch_ui true "$@"
 }
 
 remove_if_managed_adapter() {
@@ -1295,6 +1323,9 @@ main() {
       ;;
     ui)
       cmd_ui "$@"
+      ;;
+    start)
+      cmd_start "$@"
       ;;
     version)
       cmd_version "$@"

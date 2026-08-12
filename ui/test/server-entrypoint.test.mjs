@@ -70,3 +70,48 @@ test('main assigns stable CLI exit codes and signal handlers clean up without fo
   await app.close();
   assert.equal(fixture.options.process.listeners.size, 0); assert.equal(fixture.calls.stops, 1); assert.equal(fixture.calls.closes, 1);
 });
+
+test('runtime-only entry bypasses project/config resolution and LiveConsoleRuntime', async () => {
+  const processRef = processFake(['--runtime-only', '--port', '0', '--no-open']);
+  const calls = { resolvePaths: 0, runtimePaths: null, runtime: null, live: 0, http: null, stops: 0, closes: 0 };
+  const runtime = {
+    apiController: { handle() {} },
+    sseHub: { close() {} },
+    async start() {},
+    async stop() { calls.stops += 1; },
+  };
+  const http = {
+    port: 0,
+    async listen(port) { calls.listen = port; this.port = 4318; return { host: '127.0.0.1', port: 4318 }; },
+    async close() { calls.closes += 1; },
+  };
+  const app = await startHodUi({
+    process: processRef,
+    output: output(),
+    argv: ['--runtime-only', '--port', '0', '--no-open'],
+    parseOptions: () => ({ port: 0, open: false, runtimeOnly: true }),
+    resolvePaths: () => { calls.resolvePaths += 1; throw new Error('project/config resolver must not run'); },
+    resolveRuntimePaths: (options) => {
+      calls.runtimePaths = options;
+      return { publicRoot: '/runtime/public', herdrBin: 'herdr' };
+    },
+    createRuntime: () => { calls.live += 1; throw new Error('legacy runtime must not run'); },
+    createRuntimeOnly: (options) => { calls.runtime = options; return runtime; },
+    createHttpServer: (options) => { calls.http = options; return http; },
+    randomBytes: (size) => Buffer.alloc(size, 3),
+  });
+
+  assert.equal(calls.resolvePaths, 0);
+  assert.equal(calls.live, 0);
+  assert.equal(calls.runtime.runtimeOnly, true);
+  assert.equal(calls.runtime.publicRoot, '/runtime/public');
+  assert.equal(Object.hasOwn(calls.runtime, 'projectRoot'), false);
+  assert.equal(Object.hasOwn(calls.runtime, 'configPath'), false);
+  assert.equal(Object.hasOwn(calls.runtime, 'templatesRoot'), false);
+  assert.equal(calls.http.host, '127.0.0.1');
+  assert.equal(calls.listen, 0);
+  assert.equal(calls.runtimePaths.cwd, undefined);
+  await app.close();
+  assert.equal(calls.stops, 1);
+  assert.equal(calls.closes, 1);
+});

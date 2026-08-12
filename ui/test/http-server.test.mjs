@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { SessionAuth } from '../server/session-auth.mjs';
 import { SseHub } from '../server/sse-hub.mjs';
 import { createHttpServer } from '../server/http-server.mjs';
+import { GlobalObserverApiController } from '../server/global-observer-api-controller.mjs';
+import { startHodUi } from '../server.mjs';
 
 const apps = [];
 const root = await mkdtemp(join(tmpdir(), 'hod-http-'));
@@ -49,6 +51,34 @@ function rawRequest(server, path, headers = {}) {
     request.end();
   });
 }
+
+test('startHodUi preserves a class controller receiver over real loopback HTTP', async () => {
+  const agents = Array.from({ length: 5 }, (_, index) => ({ paneId: `pane-${index + 1}` }));
+  const runtimeStore = { getSnapshot: () => ({ agents }), selectPane() {} };
+  const controller = new GlobalObserverApiController({ runtimeStore,
+    selectTranscript: async (paneId) => ({ paneId, text: 'selected', revision: 1 }) });
+  const runtime = { apiController: controller, async start() {}, async stop() {} };
+  const direct = await runtime.apiController.handle({ method: 'GET', path: '/api/state' });
+  assert.equal(direct.status, 200); assert.equal(direct.body.agents.length, 5);
+  const processRef = { argv: ['node', 'server.mjs'], env: {}, platform: 'linux', cwd: () => root,
+    on() {}, off() {} };
+  const started = await startHodUi({ process: processRef, output: { stdout: [] },
+    argv: ['--runtime-only', '--no-open'], parseOptions: () => ({ port: 0, open: false, runtimeOnly: true }),
+    resolveRuntimePaths: () => ({ publicRoot: root, herdrBin: 'herdr' }),
+    createRuntimeOnly: () => runtime, randomBytes: (size) => Buffer.alloc(size, 1) });
+  apps.push(started);
+  const origin = started.origin;
+  const token = decodeURIComponent(new URL(started.launchUrl).hash.slice('#token='.length));
+  const boot = await request(started.httpServer, '/api/session', { method: 'POST', headers: { Origin: origin, 'X-HOD-Bootstrap': token } });
+  const cookie = boot.headers.get('set-cookie').split(';', 1)[0];
+  const state = await request(started.httpServer, '/api/state', { headers: { Cookie: cookie } });
+  assert.equal(state.status, 200); assert.equal((await state.json()).agents.length, 5);
+  const transcript = await request(started.httpServer, '/api/transcript/select', {
+    method: 'POST', headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paneId: 'pane-1' }),
+  });
+  assert.equal(transcript.status, 200); assert.equal((await transcript.json()).text, 'selected');
+});
 
 test('exact loopback host/origin, one-time bootstrap, cookie reload, and API delegation', async () => {
   const { server, calls } = await app();
