@@ -7,7 +7,7 @@ const SVG_NS = ['http:', '', 'www.w3.org', '2000', 'svg'].join('/');
 const ROLE_RELATIONS = Object.freeze({ controller: 'delegate', worker: 'delegate', advisor: 'consult', reviewer: 'verify', tester: 'verify' });
 const ROLE_LABELS = Object.freeze({ controller: 'COORDINATOR', worker: 'WORKER', advisor: 'ADVISOR', reviewer: 'REVIEWER', tester: 'TESTER', unmapped: 'UNMAPPED' });
 const RELATIONS = new Set(Object.values(ROLE_RELATIONS));
-function stringValue(value, fallback = '—') { return typeof value === 'string' && value !== '' ? value : fallback; }
+function stringValue(value, fallback = '—') { return typeof value === 'string' && value !== '' ? value : fallback; } function workspaceId(value) { return typeof value === 'string' && value.trim() !== '' ? value : null; } function nodeKey(space, pane) { return space === null || pane === null ? null : JSON.stringify([space, pane]); }
 function orchestrationOf(agent) {
   const value = agent?.orchestration;
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -32,19 +32,20 @@ function metadataFor(agent) {
 export function buildOrchestrationGraphModel(input, selectedWorkspace = null) {
   const nodes = buildAgentViewModels(input, selectedWorkspace).map((agent, index) => {
     const metadata = metadataFor(agent);
-    return { ...agent, key: agent.id ?? `unmapped-${index}`, role: metadata.role,
+    return { ...agent, workspaceId: workspaceId(agent.workspaceId), key: agent.id ?? `unmapped-${index}`, role: metadata.role,
       mapped: metadata.mapped, parentPaneId: metadata.parentPaneId, relation: metadata.relation,
       task: metadata.task, runId: metadata.runId, disconnected: !metadata.mapped };
   });
   const layout = layoutOrchestrationNodes(nodes);
-  const byId = new Map(nodes.filter((node) => node.id !== null).map((node) => [node.id, node]));
+  const workspaceLabels = new Map((Array.isArray(input?.workspaces) ? input.workspaces : []).flatMap((workspace) => { const id = workspaceId(workspace?.id ?? workspace?.workspaceId ?? workspace?.workspace_id); return id === null ? [] : [[id, String(workspace?.label ?? id)]]; })); layout.sections.forEach((section) => { section.label = workspaceLabels.get(section.workspaceId) ?? String(section.workspaceId ?? 'workspace'); });
+  const byId = new Map(nodes.filter((node) => node.id !== null && node.workspaceId !== null).map((node) => [nodeKey(node.workspaceId, node.id), node]));
   const edges = nodes.flatMap((target) => {
-    const source = target.parentPaneId ? byId.get(target.parentPaneId) : null;
-    const connected = source?.mapped && source.id !== target.id && target.relation
+    const source = target.parentPaneId ? byId.get(nodeKey(target.workspaceId, target.parentPaneId)) : null;
+    const connected = source?.mapped && target.workspaceId !== null && source.workspaceId === target.workspaceId && source.id !== target.id && target.relation
       && target.runId !== null && source.runId === target.runId;
     if (target.parentPaneId && !connected) target.disconnected = true;
     if (!connected) return [];
-    return [{ id: `${source.id}->${target.id}`, source, target, relation: target.relation,
+    return [{ id: `${target.workspaceId}:${source.id}->${target.id}`, source, target, relation: target.relation,
       targetWorking: target.status === 'working' }];
   });
   return { ...layout, nodes, edges, hasUnmapped: nodes.some((node) => node.disconnected) };
@@ -119,18 +120,23 @@ function nodeCanvasItem(documentRef, node, selected, mobile) {
     'data-node-layout-role': node.role, 'data-pane-id': node.id,
   }, [nodeButton(documentRef, node, selected)]);
 }
-function laneCanvasItems(documentRef, model) {
+function laneCanvasItems(documentRef, model, section = null) {
   const lanes = [['advisor', 'ADVISOR', ['advisor']], ['controller', 'COORDINATOR', ['controller', 'unmapped']],
     ['worker', 'WORKER', ['worker']], ['review', 'REVIEW / TEST', ['reviewer', 'tester']]];
+  const nodes = section ? model.nodes.filter((node) => node.workspaceId === section.workspaceId) : model.nodes; const positions = section?.lanes ?? model.lanes; const workspaceAttribute = section ? { 'data-workspace-id': section.workspaceId } : {};
   return lanes.flatMap(([className, label, roles]) => {
-    if (!model.nodes.some((node) => roles.includes(node.role))) return [];
-    const right = className === 'worker' || className === 'review';
-    return [svgElement(documentRef, 'foreignObject', {
+    if (!nodes.some((node) => roles.includes(node.role))) return [];
+    const right = className === 'worker' || className === 'review'; return [svgElement(documentRef, 'foreignObject', {
       class: `graph-lane-container graph-lane-${className}`,
-      x: right ? '66%' : '4%', y: Math.max(8, model.lanes[className] - 24),
-      width: '30%', height: '20',
+      x: right ? '66%' : '4%', y: Math.max(8, positions[className] - 24),
+      width: '30%', height: '20', ...workspaceAttribute,
     }, [createElement('span', { class: `graph-lane-label graph-lane-${className}` }, [label], documentRef)])];
   });
+} function workspaceBandItems(documentRef, model, mobile) {
+  const variant = mobile ? 'mobile' : 'desktop';
+  return model.sections.length > 1 ? model.sections.map((section) => { const bounds = section.bounds[variant]; return svgElement(documentRef, 'g', { class: 'graph-workspace-band', 'data-workspace-id': section.workspaceId, 'aria-label': section.label }, [
+    svgElement(documentRef, 'rect', { class: 'graph-workspace-band-surface', x: '0', y: bounds.top, width: '100%', height: bounds.height }), svgElement(documentRef, 'text', { class: 'graph-workspace-band-label', x: '2%', y: bounds.top + 19 }, [documentRef.createTextNode(section.label)]),
+  ]); }) : [];
 }
 function graphCanvas(documentRef, model, mobile, selectedPane) {
   const variant = mobile ? 'mobile' : 'desktop';
@@ -139,13 +145,12 @@ function graphCanvas(documentRef, model, mobile, selectedPane) {
     height: mobile ? model.mobileHeight : model.height, role: 'group',
     'aria-label': `${variant} live orchestration graph. Drag to pan; use Control or Command plus scroll to zoom.`, 'data-graph-variant': variant,
   });
-  const layer = svgElement(documentRef, 'g', { class: 'graph-viewport-layer' });
+  const layer = svgElement(documentRef, 'g', { class: 'graph-viewport-layer' }); for (const band of workspaceBandItems(documentRef, model, mobile)) layer.appendChild(band);
   layer.appendChild(edgeLayer(documentRef, model, mobile));
-  if (!mobile) for (const lane of laneCanvasItems(documentRef, model)) layer.appendChild(lane);
+  if (!mobile) for (const section of model.sections.length > 1 ? model.sections : [null]) for (const lane of laneCanvasItems(documentRef, model, section)) layer.appendChild(lane);
   for (const node of model.nodes) layer.appendChild(nodeCanvasItem(documentRef, node,
     node.id !== null && String(node.id) === String(selectedPane), mobile));
-  canvas.appendChild(layer);
-  return canvas;
+  canvas.appendChild(layer); return canvas;
 }
 export function renderOrchestrationGraph(documentRef, root, state = {}, options = {}) {
   clearChildren(root);

@@ -50,8 +50,8 @@
   background-size: 32px 32px;
   border: var(--border-width) solid var(--line);
 }
-.graph-canvas { display: block; width: 100%; max-width: 100%; height: auto; min-height: 100%; }
-.graph-canvas-mobile { display: none; }
+.graph-canvas { display: block; width: 100%; max-width: 100%; height: auto; min-height: 100%; } .graph-canvas-mobile { display: none; }
+.graph-workspace-band { pointer-events: none; } .graph-workspace-band-surface { fill: var(--bg-raised); fill-opacity: 0.28; stroke: var(--line); } .graph-workspace-band-label { fill: var(--fg-faint); font-size: var(--fs-xxs); letter-spacing: 0.08em; pointer-events: none; }
 .graph-edges { pointer-events: none; }
 .graph-edge {
   fill: none;

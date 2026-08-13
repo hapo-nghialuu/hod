@@ -5,12 +5,11 @@ import {
   buildOrchestrationGraphModel,
   renderOrchestrationGraph,
 } from '../public/modules/orchestration-graph-view.mjs';
-
 function agent(id, role, options = {}) {
   const controller = role === 'controller';
   return {
     paneId: id,
-    workspaceId: 'space',
+    workspaceId: options.workspaceId ?? 'space',
     display: id,
     agentKind: options.agentKind ?? null,
     status: options.status ?? 'idle',
@@ -23,31 +22,27 @@ function agent(id, role, options = {}) {
     },
   };
 }
-
 class FakeNode {
   constructor(name, ownerDocument) { this.name = name; this.ownerDocument = ownerDocument; this.attrs = {}; this.children = []; this.nodeType = 1; }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   appendChild(child) { this.children.push(child); return child; }
   replaceChildren(...children) { this.children = children; }
 }
-
 const fakeDocument = {
   createElement(name) { return new FakeNode(name, fakeDocument); },
   createTextNode(text) { return { nodeType: 3, textContent: String(text) }; },
 };
-
-function descendants(node, result = []) {
-  for (const child of node.children ?? []) {
-    if (child.nodeType === 1) result.push(child);
-    descendants(child, result);
-  }
-  return result;
-}
-
+function descendants(node, result = []) { for (const child of node.children ?? []) { if (child.nodeType === 1) result.push(child); descendants(child, result); } return result; }
 function visibleText(node) {
   return node.nodeType === 3 ? node.textContent : (node.children ?? []).map(visibleText).join('');
 }
-
+function assertBandContainment(model) {
+  for (const variant of ['desktop', 'mobile']) {
+    const sections = model.sections.map((section) => section.bounds[variant]);
+    for (let index = 1; index < sections.length; index += 1) assert.ok(sections[index - 1].bottom < sections[index].top, `${variant} band gap`);
+    for (const node of model.nodes) { const bounds = model.sections.find((section) => section.workspaceId === node.workspaceId).bounds[variant]; const position = node.position[variant]; assert.ok(position.y >= bounds.top && position.y + position.height <= bounds.bottom, `${variant} node containment`); }
+  }
+}
 test('lane layout fans out a single worker lane and scales for mobile', () => {
   const runtime = {
     agents: [
@@ -80,7 +75,6 @@ test('lane layout fans out a single worker lane and scales for mobile', () => {
     }
   }
 });
-
 test('role-relation mismatches become unmapped and never create edges', () => {
   const model = buildOrchestrationGraphModel({ agents: [
     agent('controller', 'controller'),
@@ -99,7 +93,6 @@ test('role-relation mismatches become unmapped and never create edges', () => {
     assert.equal(node.disconnected, true, id);
   }
 });
-
 test('array/object metadata never coerces into topology roots or edges', () => {
   const cases = [
     ['role', [['controller'], { value: 'controller' }], { parentPaneId: null, relation: null }],
@@ -127,7 +120,6 @@ test('array/object metadata never coerces into topology roots or edges', () => {
     }
   }
 });
-
 test('missing, self, and cross-run parents stay disconnected without inferred edges', () => {
   const runtime = {
     agents: [
@@ -144,15 +136,27 @@ test('missing, self, and cross-run parents stay disconnected without inferred ed
     assert.equal(model.nodes.find((node) => node.id === id).disconnected, true, id);
   }
   assert.equal(model.nodes.find((node) => node.id === 'valid').disconnected, false);
+  const unknown = buildOrchestrationGraphModel({ agents: [{ ...agent('unknown-controller', 'controller'), workspaceId: null }, { ...agent('unknown-worker', 'worker', { parentPaneId: 'unknown-controller' }), workspaceId: null }, { ...agent('empty-controller', 'controller'), workspaceId: '' }, { ...agent('empty-worker', 'worker', { parentPaneId: 'empty-controller' }), workspaceId: '' }] }); assert.equal(unknown.edges.length, 0); assert.equal(unknown.nodes.find((node) => node.id === 'unknown-worker').disconnected, true); assert.equal(unknown.nodes.find((node) => node.id === 'empty-worker').workspaceId, null); assert.equal(unknown.nodes.find((node) => node.id === 'empty-worker').disconnected, true);
 });
-
+test('ALL isolates labeled workspace bands and rejects cross-workspace parents', () => {
+  const runtime = { workspaces: [{ id: 'wD', label: 'cafekit' }, { id: 'wB', label: 'ngeax' }], agents: [
+    agent('controller', 'controller', { workspaceId: 'wD' }), agent('d-worker', 'worker', { workspaceId: 'wD', parentPaneId: 'controller' }), agent('controller', 'controller', { workspaceId: 'wB' }), agent('b-advisor', 'advisor', { workspaceId: 'wB', parentPaneId: 'controller' }), agent('cross-worker', 'worker', { workspaceId: 'wD', parentPaneId: 'b-advisor' }),
+  ] };
+  const model = buildOrchestrationGraphModel(runtime); assert.equal(model.sections.length, 2);
+  assert.deepEqual(new Set(model.sections.map((section) => section.label)), new Set(['cafekit', 'ngeax']));
+  assert.equal(model.edges.length, 2); assert.equal(model.nodes.find((node) => node.id === 'b-advisor').disconnected, false); assert.equal(model.nodes.find((node) => node.id === 'cross-worker').disconnected, true); assertBandContainment(model);
+  const root = new FakeNode('div', fakeDocument); renderOrchestrationGraph(fakeDocument, root, { runtime }); const desktop = descendants(root).find((node) => node.name === 'svg' && node.attrs['data-graph-variant'] === 'desktop'); const laneItems = descendants(desktop).filter((node) => node.attrs.class?.includes('graph-lane-container')); const lanesByWorkspace = new Map();
+  for (const lane of laneItems) { const workspaceId = lane.attrs['data-workspace-id']; const labels = lanesByWorkspace.get(workspaceId) ?? []; labels.push(visibleText(lane)); lanesByWorkspace.set(workspaceId, labels); const bounds = model.sections.find((section) => String(section.workspaceId) === workspaceId).bounds.desktop; const y = Number(lane.attrs.y); assert.ok(y >= bounds.top && y + Number(lane.attrs.height) <= bounds.bottom, `${workspaceId} lane containment`); }
+  assert.deepEqual(new Set(lanesByWorkspace.get('wD')), new Set(['COORDINATOR', 'WORKER'])); assert.deepEqual(new Set(lanesByWorkspace.get('wB')), new Set(['COORDINATOR', 'ADVISOR']));
+  const selectedRoot = new FakeNode('div', fakeDocument); const selected = renderOrchestrationGraph(fakeDocument, selectedRoot, { runtime, selectedWorkspace: 'wB' }); assert.equal(selected.sections.length, 1); assert.equal(selected.height, 340); assert.equal(selected.mobileHeight, 340); assert.equal(descendants(selectedRoot).some((node) => node.attrs.class === 'graph-workspace-band'), false);
+});
 test('CSP-safe SVG canvases keep unmapped nodes distinct without inline styles', () => {
   const root = new FakeNode('div', fakeDocument);
   const model = renderOrchestrationGraph(fakeDocument, root, { runtime: { agents: [
       agent('controller', 'controller', { agentKind: 'claude' }),
       agent('worker', 'worker', { status: 'working', agentKind: 'codex' }),
-    { paneId: 'orphan-a', display: 'orphan-a', status: 'idle', orchestration: null },
-    { paneId: 'orphan-b', display: 'orphan-b', status: 'idle', orchestration: null },
+    { paneId: 'orphan-a', workspaceId: 'space', display: 'orphan-a', status: 'idle', orchestration: null },
+    { paneId: 'orphan-b', workspaceId: 'space', display: 'orphan-b', status: 'idle', orchestration: null },
   ] } });
   const rendered = [root, ...descendants(root)];
   assert.equal(rendered.some((node) => Object.hasOwn(node.attrs, 'style')), false);
@@ -170,6 +174,7 @@ test('CSP-safe SVG canvases keep unmapped nodes distinct without inline styles',
   assert.ok(workingButtons.every((node) => node.attrs['data-agent-status'] === 'working'));
   const canvases = descendants(root).filter((node) => node.name === 'svg' && node.attrs['data-graph-variant']);
   assert.deepEqual(canvases.map((node) => node.attrs['data-graph-variant']), ['desktop', 'mobile']);
+  const singleSpaceLanes = descendants(canvases[0]).filter((node) => node.attrs.class?.includes('graph-lane-container')); assert.deepEqual(new Set(singleSpaceLanes.map(visibleText)), new Set(['COORDINATOR', 'WORKER'])); assert.ok(singleSpaceLanes.every((node) => !Object.hasOwn(node.attrs, 'data-workspace-id')));
   for (const canvas of canvases) {
     assert.equal(canvas.attrs.width, '100%');
     assert.match(canvas.attrs.height, /^\d+$/);

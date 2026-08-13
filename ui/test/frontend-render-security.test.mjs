@@ -87,6 +87,8 @@ test('compact three-pane layout adapts on medium/mobile and graph motion is redu
   assert.doesNotMatch(html, /data-action=["']refresh/); assert.match(html, /<footer\b[^>]*class=["']statusbar["'][^>]*\bhidden\b/); assert.match(layoutCss, /\.statusbar\[hidden\]\s*\{[^}]*display:\s*none/);
   assert.doesNotMatch(layoutCss, /\.rail\b/);
   assert.match(layoutCss, /\.main\s*\{[\s\S]*grid-template-columns:/);
+  assert.match(layoutCss, /grid-template-columns:\s*minmax\(13rem,\s*14rem\)\s+minmax\(30rem,\s*1fr\)\s+minmax\(22rem,\s*26\.4rem\)/);
+  assert.match(layoutCss, /@media\s*\(max-width:\s*1280px\)[\s\S]*minmax\(19\.8rem,\s*22rem\)/);
   assert.match(layoutCss, /@media\s*\(max-width:\s*1040px\)[\s\S]*\.app\s*\{[^}]*overflow:\s*auto[\s\S]*grid-template-rows:/); assert.match(layoutCss, /@media\s*\(max-width:\s*760px\)[\s\S]*\.main\s*\{[^}]*flex-direction:\s*column/);
   assert.match(graphCss, /prefers-reduced-motion/);
   assert.match(graphCss, /\.graph-edge\.is-target-working\s*\{[\s\S]*animation:\s*none/);
