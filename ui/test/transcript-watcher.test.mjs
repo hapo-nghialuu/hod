@@ -40,7 +40,8 @@ const assertPanePolling = (clients) => {
     assert.deepEqual(methods(client), ['pane.read']);
     assert.equal(client.requests.length, 1);
     assert.deepEqual(client.requests[0].params, {
-      pane_id: client.requests[0].params.pane_id, source: 'recent', format: 'ansi', strip_ansi: false,
+      pane_id: client.requests[0].params.pane_id, source: 'recent', lines: 4_096,
+      format: 'ansi', strip_ansi: false,
     });
   }
 };

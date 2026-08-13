@@ -7,7 +7,8 @@ import {
 } from './transcript-text-limit.mjs';
 export const DEFAULT_WAIT_TIMEOUT_MS = 60_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = DEFAULT_WAIT_TIMEOUT_MS + 5_000;
-const PANE_READ_REQUEST = Object.freeze({ source: 'recent', format: 'ansi', strip_ansi: false });
+const MAX_RECENT_LINES = 4_096;
+const PANE_READ_REQUEST = Object.freeze({ source: 'recent', lines: MAX_RECENT_LINES, format: 'ansi', strip_ansi: false });
 function selectionError(selection) {
   return !selection || typeof selection !== 'object'
     || typeof selection.socketPath !== 'string' || selection.socketPath.trim() === ''
