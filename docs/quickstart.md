@@ -116,9 +116,11 @@ For the global runtime-only view from any directory:
 hod start [--port <0-65535>] [--no-open]
 ```
 
-`hod start --project <path>` is rejected. Runtime-only mode hides Settings and
-does not call settings APIs or expose control/mutation actions. The existing
-`hod ui` and `hod ui --project` commands are unchanged.
+`hod start --project <path>` is rejected. Settings selects a live project/space
+by workspace ID; the server resolves its current checkout without exposing a
+path to the browser and fails closed on missing or ambiguous targets. Confirmed
+settings mutations are available, while agent control remains disabled. The
+existing `hod ui` and `hod ui --project` commands are unchanged.
 
 ## Where to go next
 

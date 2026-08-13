@@ -2,6 +2,9 @@
 
 **Requirement:** R1.5 and R2.1-R2.5 — global view, compatibility, and UI capabilities
 **Status:** done
+**Supersession:** This task and its evidence record the original Settings-hidden
+baseline. The user-approved R2-01 task adds workspace-scoped Settings while
+preserving this task's aggregation, transcript, theme, and security behavior.
 **Hotfix status:** tab representation verified
 **Priority:** P0
 **Estimated Effort:** 2–3 implementation days

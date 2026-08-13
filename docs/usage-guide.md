@@ -308,9 +308,11 @@ hod start [--port <0-65535>] [--no-open]
 ```
 
 `hod start --project <path>` is rejected. `hod start` is foreground,
-loopback-only, and runtime-only: it does not resolve or read project/config
-settings, start Herdr agents, or expose mutation/control actions. The existing
-`hod ui` and `hod ui --project` commands remain unchanged.
+loopback-only, and independent of the launch directory. It does not start or
+control Herdr agents. Its Settings view selects a current Herdr project/space by
+workspace ID and supports confirmed settings mutations; the server resolves the
+authoritative checkout without exposing project paths to the browser. The
+existing `hod ui` and `hod ui --project` commands remain unchanged.
 
 ### Local-only boundary
 
@@ -354,10 +356,12 @@ agent activity or as evidence that omitted output never existed.
 
 ### Settings view
 
-The Settings view is available in the legacy `hod ui` path. In runtime-only
-`hod start`, the state capabilities set `settings`, `control`, and `mutation`
-to false: Settings is hidden and unreachable, the settings API is not called,
-and no save/control action is exposed. The Settings view otherwise shows HOD
+The Settings view is available in both `hod ui` and `hod start`. In `hod start`,
+the browser chooses from bounded project/space labels and opaque workspace IDs;
+the backend resolves a fresh Herdr snapshot to one authoritative checkout or
+coordinator directory. It rejects missing, unsafe, or ambiguous targets and
+never returns project paths to the browser. Settings and confirmed mutations
+are enabled, while agent control remains disabled. The Settings view shows HOD
 role profile status for exactly `controller`, `impl`, and `reviewer`. A missing
 role uses the confirmation
 `INSTALL HOD ROLE`. A role whose installed file differs requires `force` and

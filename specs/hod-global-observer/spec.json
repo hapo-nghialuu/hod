@@ -1,11 +1,11 @@
 {
   "feature_name": "hod-global-observer",
   "created_at": "2026-08-11T23:14:08+07:00",
-  "updated_at": "2026-08-12T02:03:26+07:00",
+  "updated_at": "2026-08-13T10:00:50+07:00",
   "language": "en",
-  "status": "in_progress",
-  "phase": "implementation",
-  "current_phase": "implementation",
+  "status": "done",
+  "phase": "review",
+  "current_phase": "review",
   "priority": "P0",
   "effort": "3–5 implementation days",
   "tags": ["hod", "global-observer", "runtime-only", "loopback"],
@@ -24,18 +24,20 @@
     }
   },
   "scope_lock": {
-    "source": "User-approved runtime-only global Herdr observer via hod start",
+    "source": "User-approved global Herdr observer via hod start; scope expanded on 2026-08-12 to workspace-scoped Settings in the same UI",
     "in_scope": [
       "hod start from any directory",
       "Foreground loopback runtime-only observation of all Herdr workspaces, tabs, panes, agents, and selected transcript",
       "Herdr 0.8 one-request-per-connection snapshots",
       "Capability-aware UI with all-space counts for spaces, agents, working, blocked, idle, and done",
+      "Workspace-scoped HOD role Settings selected by opaque workspace ID with server-side authoritative target resolution",
+      "Confirmed mutations for the existing typed global Herdr settings allowlist",
       "Backward compatibility for hod ui and hod ui --project",
       "Preservation of Session Host Origin security and Claude-orange terminal UI"
     ],
     "out_of_scope": [
-      "Project/config path resolution or project/config reads and writes",
-      "Settings UI, settings APIs, and global settings",
+      "Launch-directory-derived project/config access or browser-supplied project paths",
+      "Unknown, secret, unconfirmed, ambiguous-target, unsafe-target, or cross-workspace settings writes",
       "Daemon PID, Herdr lifecycle control, LAN exposure, agent control, auto-install, and auto-update"
     ],
     "expansion_policy": "requires-user-approval"
@@ -46,7 +48,8 @@
   },
   "task_files": [
     "tasks/task-R0-01-runtime-only-entrypoint.md",
-    "tasks/task-R1-01-runtime-observer-ui.md"
+    "tasks/task-R1-01-runtime-observer-ui.md",
+    "tasks/task-R2-01-workspace-scoped-settings.md"
   ],
   "file_scope": {
     "R0-01": {
@@ -66,7 +69,6 @@
         "ui/test/global-observer-api-controller.test.mjs"
       ],
       "protected_unchanged": [
-        "ui/server/application-paths.mjs",
         "ui/server/live-console-runtime.mjs",
         "ui/server/api-controller.mjs",
         "ui/server/runtime-events.mjs"
@@ -93,6 +95,29 @@
       ],
       "create": [],
       "create_policy": "Only a focused frontend module or test may be created if needed to keep the existing 200-line limit."
+    },
+    "R2-01": {
+      "modify": [
+        "ui/server.mjs",
+        "ui/server/application-paths.mjs",
+        "ui/server/global-observer-api-controller.mjs",
+        "ui/server/global-observer-runtime.mjs",
+        "ui/public/app.mjs",
+        "ui/public/modules/api-client.mjs",
+        "ui/public/modules/runtime-sync.mjs",
+        "ui/public/modules/settings-view.mjs",
+        "ui/test/global-observer-api-controller.test.mjs",
+        "ui/test/global-observer-runtime.test.mjs",
+        "ui/test/runtime-sync.test.mjs",
+        "ui/test/server-entrypoint.test.mjs",
+        "ui/test/settings-view.test.mjs",
+        "ui/test/ui-store.test.mjs"
+      ],
+      "create": [
+        "ui/server/global-settings.mjs",
+        "ui/public/modules/settings-project-selector.mjs",
+        "ui/test/global-settings.test.mjs"
+      ]
     }
   },
   "task_registry": {
@@ -117,6 +142,20 @@
       "started_at": null,
       "completed_at": "2026-08-12T02:03:26+07:00",
       "last_updated_at": "2026-08-12T02:03:26+07:00"
+    },
+    "tasks/task-R2-01-workspace-scoped-settings.md": {
+      "id": "R2-01",
+      "title": "Workspace-scoped Settings",
+      "status": "done",
+      "dependencies": [
+        "tasks/task-R0-01-runtime-only-entrypoint.md",
+        "tasks/task-R1-01-runtime-observer-ui.md"
+      ],
+      "validation_required": true,
+      "blocker": null,
+      "started_at": "2026-08-12T20:30:52+07:00",
+      "completed_at": "2026-08-13T10:00:50+07:00",
+      "last_updated_at": "2026-08-13T10:00:50+07:00"
     }
   },
   "blocker": null,
@@ -137,9 +176,9 @@
     "design_done": "2026-08-11T23:17:08+07:00",
     "tasks_done": "2026-08-11T23:18:08+07:00",
     "code_done": "2026-08-12T02:03:26+07:00",
-    "test_done": "2026-08-12T02:03:26+07:00",
-    "review_done": "2026-08-12T02:03:26+07:00",
-    "validation_done": "2026-08-12T02:03:26+07:00"
+    "test_done": "2026-08-13T10:00:50+07:00",
+    "review_done": "2026-08-13T10:00:50+07:00",
+    "validation_done": "2026-08-13T10:00:50+07:00"
   },
   "design_context": {
     "discovery_mode": "source-grounded",
@@ -150,10 +189,10 @@
   "validation": {
     "status": "completed",
     "required": true,
-    "reason": "Mandatory spec-output and spec-ground validators passed after repository path and contract correction.",
-    "session_count": 1,
+    "reason": "The original observer contract passed validation; the user-approved workspace Settings expansion requires fresh deterministic validation and release review.",
+    "session_count": 2,
     "questions_asked": 0,
-    "last_validated_at": "2026-08-12T00:53:23+07:00"
+    "last_validated_at": "2026-08-13T10:00:50+07:00"
   },
   "translation": {
     "enabled": false,
@@ -163,5 +202,5 @@
     "sync": "always",
     "last_synced_at": null
   },
-  "ready_for_implementation": true
+  "ready_for_implementation": false
 }

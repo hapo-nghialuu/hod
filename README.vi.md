@@ -240,9 +240,11 @@ Muốn xem observer runtime-only, không phụ thuộc thư mục hiện tại, 
 hod start [--port <0-65535>] [--no-open]
 ```
 
-`hod start --project <path>` bị từ chối; observer bỏ qua thư mục hiện tại và
-không đọc project/config settings. `hod ui` và `hod ui --project` vẫn giữ
-nguyên hành vi project-scoped hiện có.
+`hod start --project <path>` bị từ chối; observer bỏ qua thư mục hiện tại.
+Settings chọn project/space Herdr đang chạy bằng workspace ID bất định danh;
+server tự resolve checkout hiện tại theo nguồn authoritative và không bao giờ
+đưa đường dẫn project ra browser. `hod ui` và `hod ui --project` vẫn giữ nguyên
+hành vi project-scoped hiện có.
 
 UI hỗ trợ macOS và Linux, cần Node.js 20 trở lên. Port mặc định là `0` để hệ
 điều hành tự chọn port trống; macOS dùng `open`, Linux dùng `xdg-open`. Với
@@ -256,10 +258,11 @@ phải subscription Herdr event-driven; Herdr lỗi là nonfatal và reconnect x
 state stale. Dashboard tính tổng toàn bộ space cho spaces, agents, working,
 blocked, idle và done, không phụ thuộc space đang chọn. Transcript chỉ là tail
 16 MiB UTF-8 trong RAM của pane đang chọn, chỉ đọc, không persistent,
-byte-exact, append-only hay audit log. Với `hod start`, capability runtime-only
-ẩn Settings và không dùng endpoint settings hay hành động control/mutation.
-`hod ui` legacy vẫn giữ Settings cho ba role HOD và đúng mười key Herdr có kiểu;
-key lạ/bí mật không lộ ra.
+byte-exact, append-only hay audit log. Với `hod start`, Settings có thể cài ba
+profile role HOD đã công bố cho project live đang chọn và cập nhật đúng mười key
+Herdr global có kiểu sau khi xác nhận. Project root thiếu hoặc mơ hồ sẽ fail
+closed; key lạ/bí mật không lộ ra. Runtime-only vẫn không có hành động điều
+khiển agent.
 
 Ma trận setting, confirmation/force, giới hạn ghi và residual boundary khi cùng
 user swap path được mô tả đầy đủ ở [Console UI HOD cục bộ](docs/usage-guide.md#local-hod-ui-console).

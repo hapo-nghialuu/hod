@@ -2,6 +2,9 @@
 
 **Requirement:** R1.1-R1.4 and R2.2 — global observer runtime boundary
 **Status:** done
+**Supersession:** This task and its evidence record the original Settings-denied
+baseline. The user-approved R2-01 task supersedes only that capability boundary;
+the launcher, polling, transcript, network, and agent-control constraints remain.
 **Priority:** P0
 **Estimated Effort:** 1–2 implementation days
 **Dependencies:** none

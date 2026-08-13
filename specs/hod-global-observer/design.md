@@ -2,10 +2,12 @@
 
 ## Overview
 
-`hod start` adds a global, read-only observer for live Herdr workspaces, tabs,
-panes, agents, and a selected transcript. It runs in the foreground over the
-existing loopback HTTP/session boundary and does not treat the caller's
-directory as a project.
+`hod start` adds a global observer for live Herdr workspaces, tabs, panes,
+agents, and a selected transcript. It runs in the foreground over the existing
+loopback HTTP/session boundary and does not treat the caller's directory as a
+project. Its Settings view targets a user-selected live workspace through an
+opaque ID; the server resolves the authoritative directory and never returns a
+path to the browser.
 
 The repository is a Bash launcher plus a zero-dependency Node.js 20 `.mjs`
 console; it has no TypeScript command tree. The existing `hod ui`
@@ -30,14 +32,16 @@ Claude-orange terminal presentation remain unchanged.
 - Show a selected transcript as display-only data.
 - Show all-space counts for spaces, agents, `working`, `blocked`, `idle`, and
   `done`.
+- Allow confirmed HOD role-profile writes for one selected live workspace and
+  confirmed writes to the existing typed global Herdr allowlist.
 - Preserve the existing loopback/session/Host/Origin HTTP server and terminal
   presentation.
 
 ## Out of Scope
 
-- Project/config path resolution or project/config reads and writes in the
-  runtime-only path.
-- Settings UI, settings APIs that perform I/O, or global settings access.
+- Launch-directory-derived project/config access or browser-supplied paths.
+- Unconfirmed, unknown-key, secret-key, missing-target, ambiguous-target, or
+  unsafe-target settings writes.
 - Agent control, transcript writes, Herdr lifecycle control, daemon PIDs,
   background services, LAN exposure, auto-install, or auto-update.
 - A second snapshot client or an `events.subscribe` bootstrap connection.
@@ -55,11 +59,15 @@ Claude-orange terminal presentation remain unchanged.
    coordinator and its `RuntimeClientConnections` one-shot manager. Each
    Herdr 0.8 refresh uses one fresh connection and one `session.snapshot`
    request, then closes it. No new snapshot client is introduced.
-4. `ui/server/global-observer-api-controller.mjs` exposes runtime state,
-   explicit observer capabilities, and read-only transcript selection. It does
-   not construct or call a settings service. Observer settings routes return
-   the existing route error: HTTP 404 with error code `ERR_ROUTE`.
-5. The R1 frontend consumes the explicit capabilities, aggregates all spaces
+4. `ui/server/global-observer-runtime.mjs` also composes a global Settings
+   controller. Each Settings request reads a fresh authoritative snapshot,
+   resolves one opaque workspace ID to one canonical target, and fails closed
+   on missing, stale, ambiguous, invalid, or unsafe metadata.
+5. `ui/server/global-observer-api-controller.mjs` exposes runtime state,
+   read-only transcript selection, and bounded Settings routes. Requests reject
+   path-like fields; mutations reuse the existing allowlists and confirmation
+   tokens. Agent control remains absent.
+6. The R1 frontend consumes the explicit capabilities, aggregates all spaces
    and agents, keeps selected transcript state read-only, and reuses the
    existing Claude-orange renderer.
 
@@ -84,9 +92,10 @@ correction if an implementation constraint proves otherwise.
   "workingDirectory": "ignored",
   "process": "foreground",
   "network": "loopback-only",
-  "data": "runtime-only",
-  "projectConfigPathResolution": false,
-  "projectConfigReadWrite": false,
+  "data": "runtime plus explicitly selected settings target",
+  "launchDirectoryProjectResolution": false,
+  "browserProjectPaths": false,
+  "settingsTargetResolution": "fresh authoritative snapshot by workspaceId",
   "snapshot": "one-request-per-connection",
   "eventsSubscribeAtBootstrap": false,
   "daemonPid": false,
@@ -101,17 +110,17 @@ correction if an implementation constraint proves otherwise.
 {
   "scope": "all Herdr workspaces/tabs/panes/agents",
   "capabilities": {
-    "settings": false,
+    "settings": true,
     "control": false,
-    "mutation": false
+    "mutation": true
   },
-  "settingsUi": false,
-  "settingsApi": false,
+  "settingsUi": true,
+  "settingsApi": true,
   "agentControl": false,
-  "settingsRoute": {
-    "status": 404,
-    "code": "ERR_ROUTE",
-    "settingsIo": false
+  "settingsTarget": {
+    "browserInput": "workspaceId only",
+    "serverSource": "fresh Herdr session.snapshot",
+    "failureMode": "fail closed"
   },
   "selectedTranscript": "read-only",
   "counts": ["spaces", "agents", "working", "blocked", "idle", "done"],
@@ -122,16 +131,39 @@ correction if an implementation constraint proves otherwise.
 }
 ```
 
+### WORKSPACE_SETTINGS_TARGET
+
+<!-- contract:WORKSPACE_SETTINGS_TARGET -->
+```json
+{
+  "requestIdentity": "opaque workspaceId",
+  "pathInputFromBrowser": false,
+  "resolutionPriority": ["workspace checkout_path", "single root controller cwd", "single unique pane cwd"],
+  "canonicalDirectoryRequired": true,
+  "missingOrStale": "reject",
+  "ambiguous": "reject",
+  "invalidOrUnsafe": "reject",
+  "hodRoles": ["controller", "impl", "reviewer"],
+  "herdrKeys": "existing typed allowlist",
+  "confirmationRequired": true,
+  "agentControl": false
+}
+```
+
 ## Capability and API semantics
 
-- Runtime-only state carries `capabilities.settings = false`,
-  `capabilities.control = false`, and `capabilities.mutation = false`.
+- Runtime-only state carries `capabilities.settings = true`,
+  `capabilities.control = false`, and `capabilities.mutation = true`.
 - The frontend treats an absent capability as `true` for legacy `hod ui`
   compatibility. An explicit `false` is authoritative and hides/denies that
   surface.
-- `GET /api/settings`, `POST /api/settings/hod`, and
-  `POST /api/settings/herdr` in observer mode return HTTP 404 `ERR_ROUTE` and
-  perform no settings I/O.
+- `GET /api/settings` accepts at most one opaque `workspaceId`. It returns
+  bounded workspace labels, role state for the selected target, and the
+  existing global Herdr settings allowlist; it never returns a project path.
+- `POST /api/settings/hod` requires `workspaceId`, a documented role, and the
+  existing install/overwrite confirmation. `POST /api/settings/herdr` accepts
+  only the existing typed allowlist and confirmation. Path-like fields are
+  rejected for both routes, and mutations are serialized.
 - Transcript selection is a read-only display operation. No transcript write,
   agent command, control, or lifecycle handler is exposed.
 - Missing, stale, or failed runtime snapshots become unavailable/reconnecting
@@ -178,8 +210,29 @@ R1 owns the capability-aware frontend and user documentation:
 
 R1 may create only one focused frontend module or test if that is required to
 keep the existing 200-line source/test limit. No such creation is required by
-the current plan. No implementation, documentation, or test path outside the
-tables above is in scope.
+the baseline plan.
+
+R2 owns the user-approved Settings expansion:
+
+| Action | Path |
+|---|---|
+| Modify | `ui/server.mjs` |
+| Modify | `ui/server/application-paths.mjs` |
+| Modify | `ui/server/global-observer-runtime.mjs` |
+| Modify | `ui/server/global-observer-api-controller.mjs` |
+| Create | `ui/server/global-settings.mjs` |
+| Modify | `ui/public/app.mjs` |
+| Modify | `ui/public/modules/api-client.mjs` |
+| Modify | `ui/public/modules/runtime-sync.mjs` |
+| Modify | `ui/public/modules/settings-view.mjs` |
+| Create | `ui/public/modules/settings-project-selector.mjs` |
+| Create | `ui/test/global-settings.test.mjs` |
+| Modify | `ui/test/global-observer-runtime.test.mjs` |
+| Modify | `ui/test/global-observer-api-controller.test.mjs` |
+| Modify | `ui/test/runtime-sync.test.mjs` |
+| Modify | `ui/test/server-entrypoint.test.mjs` |
+| Modify | `ui/test/settings-view.test.mjs` |
+| Modify | `ui/test/ui-store.test.mjs` |
 
 ## Test and evidence strategy
 
@@ -187,6 +240,8 @@ tables above is in scope.
   `node --test ui/test/server-entrypoint.test.mjs ui/test/runtime-options.test.mjs ui/test/runtime-client-connections.test.mjs ui/test/global-observer-runtime.test.mjs ui/test/global-observer-api-controller.test.mjs`
 - **R1 targeted Node tests:**
   `node --test ui/test/runtime-sync.test.mjs ui/test/ui-store.test.mjs ui/test/view-models.test.mjs ui/test/frontend-render-security.test.mjs`
+- **R2 targeted Node tests:**
+  `node --test ui/test/global-settings.test.mjs ui/test/global-observer-api-controller.test.mjs ui/test/global-observer-runtime.test.mjs ui/test/settings-view.test.mjs ui/test/runtime-sync.test.mjs ui/test/server-entrypoint.test.mjs ui/test/ui-store.test.mjs`
 - **Repository evidence:** `npm --prefix ui run check`,
   `./scripts/test-hod.sh`, `./scripts/validate.sh`, and `git diff --check`.
 - **Spec gates from `/Users/nghialuutrung/Desktop/ngeax`:**
@@ -194,9 +249,10 @@ tables above is in scope.
   and
   `node .codex/scripts/spec-ground.cjs /Users/nghialuutrung/.herdr/worktrees/ngeax/feat-hod-ui-console/specs/hod-global-observer --root /Users/nghialuutrung/.herdr/worktrees/ngeax/feat-hod-ui-console`.
 - **Negative/security:** prove `--project` rejection for `hod start`, no
-  project/config access, no settings I/O, 404 `ERR_ROUTE` settings routes,
-  no `events.subscribe` bootstrap, one request per fresh connection, exact
-  loopback binding, and existing Host/Origin rejection behavior.
+  launch-directory project access, no browser path input/output, fail-closed
+  workspace resolution, allowlisted confirmed writes, no `events.subscribe`
+  bootstrap, one request per fresh connection, exact loopback binding, and
+  existing Host/Origin rejection behavior.
 
 ## Requirements Traceability
 
@@ -204,6 +260,7 @@ tables above is in scope.
 |---|---|
 | R1.1-R1.4 | Entrypoint/option contract, `GLOBAL_OBSERVER_MODE`, R0 runtime and snapshot flow |
 | R1.5 | R1 global aggregation and all-space view model |
-| R2.1-R2.3 | Legacy entrypoints, reused HTTP/session/Host/Origin boundary, capability defaults |
+| R2.1-R2.3 | Legacy entrypoints, Settings routes, reused HTTP/session/Host/Origin boundary |
 | R2.4 | `UI_CAPABILITIES`, all-space counts, and Claude-orange frontend preservation |
-| R2.5 | Read-only transcript, disabled capabilities, and 404 `ERR_ROUTE` settings behavior |
+| R2.5 | Read-only transcript and absence of agent/lifecycle control |
+| R2.6 | `WORKSPACE_SETTINGS_TARGET`, path-field rejection, and fail-closed resolution |

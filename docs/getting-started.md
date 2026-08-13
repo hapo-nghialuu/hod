@@ -191,12 +191,14 @@ observer instead:
 hod start [--port <0-65535>] [--no-open]
 ```
 
-`hod start --project <path>` is rejected. It ignores the current directory and
-does not read project/config settings. Its dashboard shows all-space totals for
-spaces, agents, working, blocked, idle, and done; the selected transcript is a
-read-only, RAM-only display. Runtime-only capabilities hide Settings and omit
-settings, control, and mutation actions. The existing `hod ui` and
-`hod ui --project` paths remain unchanged.
+`hod start --project <path>` is rejected and the observer ignores the current
+directory. Its dashboard shows all-space totals for spaces, agents, working,
+blocked, idle, and done; the selected transcript is a read-only, RAM-only
+display. Settings selects a live project/space by workspace ID, while the server
+resolves the current checkout without exposing its path to the browser. Missing
+or ambiguous targets fail closed. Confirmed settings mutations are enabled, but
+agent control remains disabled. The existing `hod ui` and `hod ui --project`
+paths remain unchanged.
 
 ## While a session runs
 

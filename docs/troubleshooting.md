@@ -16,9 +16,10 @@ hod start [--port <0-65535>] [--no-open]
 `hod start --project <path>` is intentionally rejected. Use `hod ui` or
 `hod ui --project <path>` for the unchanged legacy/project-scoped console.
 The observer is runtime-only: its read-only transcript and all-space counts
-(spaces, agents, working, blocked, idle, done) do not use project/config data.
-Its runtime capabilities hide Settings and disable settings, control, and
-mutation actions.
+(spaces, agents, working, blocked, idle, done) do not depend on the launch
+directory. Settings selects a live project/space by workspace ID; the server
+resolves the target without exposing project paths to the browser. Settings
+mutations require confirmation, while agent control remains disabled.
 
 ### Node version
 
@@ -69,9 +70,11 @@ herdr status --json | jq '{client, server}'
 The HOD runtime uses bounded polling of Herdr snapshots, not a guaranteed
 event-driven Herdr subscription, so a small delay is expected.
 
-If the Settings navigation is absent while using `hod start`, that is expected:
-the observer receives `settings: false` and never calls `/api/settings`. A
-legacy `hod ui` snapshot with missing capability fields defaults them to enabled.
+If Settings cannot load a selected project in `hod start`, refresh the runtime
+snapshot and check that the space has one authoritative checkout or coordinator
+directory. Missing, unsafe, or ambiguous targets fail closed; choose a different
+live space or fix its Herdr workspace metadata. Project paths are never returned
+to the browser.
 
 ### Config parent permissions or symlink
 
