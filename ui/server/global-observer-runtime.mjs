@@ -5,6 +5,12 @@ import { TranscriptWatcher } from './transcript-watcher.mjs';
 import { SseHub } from './sse-hub.mjs';
 import { RuntimeSseBridge } from './runtime-sse-bridge.mjs';
 import { TranscriptSelectionCoordinator } from './transcript-selection-coordinator.mjs';
+import { createHerdrConfigSettings } from './settings/herdr-config-settings.mjs';
+import { createHodRoleSettings } from './settings/hod-role-settings.mjs';
+import {
+  createAuthoritativeSnapshotReader,
+  createGlobalSettingsController,
+} from './global-settings.mjs';
 import {
   createGlobalObserverApiController,
   GLOBAL_OBSERVER_CAPABILITIES,
@@ -53,9 +59,29 @@ export class GlobalObserverRuntime {
       discover: this._discover,
       onGap: (payload) => this.sseBridge.publishTranscript?.(payload),
     });
+    const settingsReader = options.settingsSnapshotReader ?? options.snapshotReader ?? createAuthoritativeSnapshotReader({
+      discover: this._discover,
+      clientFactory: options.settingsClientFactory ?? runtimeOptions.settingsClientFactory ?? runtimeOptions.clientFactory,
+      requestTimeoutMs: options.settingsRequestTimeoutMs ?? runtimeOptions.settingsRequestTimeoutMs ?? runtimeOptions.requestTimeoutMs,
+    });
+    const herdrOptions = options.herdrConfigSettingsOptions ?? options.herdrSettingsOptions
+      ?? (options.configPath ? { configPath: options.configPath, herdrBin, env } : null);
+    const globalHerdr = options.herdrConfigSettings ?? options.herdrSettings
+      ?? (herdrOptions?.configPath ? createHerdrConfigSettings(herdrOptions) : null);
+    const projectOptions = options.hodRoleSettingsOptions ?? options.hodSettingsOptions
+      ?? (options.templatesRoot && options.hodBin ? { templatesRoot: options.templatesRoot, hodBin: options.hodBin } : null);
+    const createProjectHod = options.createProjectHod ?? (projectOptions
+      ? (projectRoot) => createHodRoleSettings({ ...projectOptions, projectRoot }) : undefined);
+    this.settingsController = options.settingsController ?? options.settings ?? createGlobalSettingsController({
+      readSnapshot: settingsReader,
+      globalHerdrConfigSettings: globalHerdr,
+      hodRoleSettingsOptions: projectOptions,
+      ...(createProjectHod ? { createProjectHod } : {}),
+    });
     this.apiController = options.apiController ?? options.api
       ?? createGlobalObserverApiController({
         runtimeStore: this.runtimeStore,
+        settingsController: this.settingsController,
         selectTranscript: (paneId) => this.selectTranscript(paneId),
       });
     this.capabilities = GLOBAL_OBSERVER_CAPABILITIES;

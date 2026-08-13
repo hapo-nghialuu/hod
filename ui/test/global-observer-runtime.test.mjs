@@ -44,6 +44,7 @@ test('composes runtime events and SSE over one-shot snapshots with observer capa
     transcriptWatcher: watcher,
     sseHub: hub,
     discover: async () => ({ socketPath: '/tmp/herdr.sock' }),
+    settingsSnapshotReader: async () => sessionSnapshot(7).snapshot,
   });
 
   await runtime.start();
@@ -51,16 +52,18 @@ test('composes runtime events and SSE over one-shot snapshots with observer capa
   assert.equal(client.closed, 1);
   assert.equal(client.calls.some(({ method }) => method === 'events.subscribe'), false);
   const state = await runtime.apiController.handle({ method: 'GET', path: '/api/state' });
-  assert.deepEqual(state.body.capabilities, { settings: false, control: false, mutation: false });
+  assert.deepEqual(state.body.capabilities, { settings: true, control: false, mutation: true });
+  assert.equal(JSON.stringify(state.body).match(/(?:cwd|projectRoot|checkout_path|foreground_cwd)/i), null);
   const stateEvent = hub.events.find(({ name }) => name === 'state');
   assert.deepEqual(stateEvent.payload.capabilities, state.body.capabilities);
-  assert.equal((await runtime.apiController.handle({ method: 'GET', path: '/api/settings' })).status, 404);
+  const settings = await runtime.apiController.handle({ method: 'GET', path: '/api/settings' });
+  assert.equal(settings.status, 200); assert.equal(settings.body.selectedWorkspaceId, null);
   await runtime.stop();
   assert.equal(watcher.stops, 1);
   assert.equal(hub.closed, 0);
 });
 
-test('default runtime-only composition uses one-shot snapshots and no settings service', async () => {
+test('default runtime-only composition uses one-shot snapshots and global settings service', async () => {
   const timers = new ManualSseTimers();
   const client = new ContractRuntimeClient('default-observer', sessionSnapshot(8));
   const runtime = createGlobalObserverRuntime({
@@ -75,7 +78,7 @@ test('default runtime-only composition uses one-shot snapshots and no settings s
   });
 
   assert.equal(runtime.runtimeEvents instanceof RuntimeEvents, true);
-  assert.equal('settingsController' in runtime, false);
+  assert.equal(typeof runtime.settingsController?.get, 'function');
   assert.equal('hodRoleSettings' in runtime, false);
   assert.equal('herdrConfigSettings' in runtime, false);
   await runtime.start();

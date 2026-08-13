@@ -20,38 +20,54 @@ function makeStore() {
   return store;
 }
 
-function protectedOptionFixture(runtimeStore) {
-  const options = { runtimeStore };
-  for (const name of [
-    'settingsController', 'settings', 'hodRoleSettings', 'herdrConfigSettings',
-    'project', 'projectRoot', 'config', 'configPath', 'templatesRoot',
-  ]) {
-    Object.defineProperty(options, name, {
-      get() { throw new Error(`protected option touched: ${name}`); },
-    });
-  }
-  return options;
+function settingsService(overrides = {}) {
+  return {
+    async get(workspaceId = null) {
+      return {
+        projects: [{ workspaceId: 'w1', label: 'Workspace' }], selectedWorkspaceId: workspaceId,
+        hod: { roles: [{ role: 'impl', status: workspaceId ? 'different' : 'missing', unsafe: false }] },
+        herdr: { scope: 'global', settings: [] },
+      };
+    },
+    async postHod(body) { return { role: body.role, status: 'matches', unsafe: false }; },
+    async postHerdr(body) { return { setting: { key: body.key, value: body.value } }; },
+    ...overrides,
+  };
 }
 
-test('state exposes explicit observer capabilities and no settings service is constructed', async () => {
-  const controller = createGlobalObserverApiController(protectedOptionFixture(makeStore()));
+test('state exposes global observer capabilities and settings routes select by workspace ID', async () => {
+  const calls = []; const controller = createGlobalObserverApiController({ runtimeStore: makeStore(), settingsController: settingsService({
+    async get(workspaceId) { calls.push(['get', workspaceId]); return settingsService().get(workspaceId); },
+    async postHod(body) { calls.push(['hod', body]); return settingsService().postHod(body); },
+  }) });
   const state = await controller.handle({ method: 'GET', path: '/api/state' });
   assert.deepEqual(state.body.capabilities, GLOBAL_OBSERVER_CAPABILITIES);
-  assert.equal('settingsController' in controller, false);
-});
-
-test('settings routes return ERR_ROUTE without settings I/O', async () => {
-  const forbiddenStore = new Proxy({}, {
-    get(_target, name) { throw new Error(`runtime/settings I/O touched: ${String(name)}`); },
+  const initial = await controller.handle({ method: 'GET', path: '/api/settings' });
+  assert.equal(initial.status, 200); assert.equal(initial.body.selectedWorkspaceId, null);
+  assert.equal(initial.body.projects[0].workspaceId, 'w1');
+  assert.equal(initial.body.hod.roles[0].status, 'missing');
+  assert.equal(JSON.stringify(initial.body).includes('/'), false);
+  const selected = await controller.handle({ method: 'GET', path: '/api/settings?workspaceId=w1' });
+  assert.equal(selected.status, 200); assert.equal(selected.body.selectedWorkspaceId, 'w1');
+  assert.deepEqual(calls, [['get', null], ['get', 'w1']]);
+  assert.deepEqual(await controller.handle({ method: 'POST', path: '/api/settings/hod', body: {
+    workspaceId: 'w1', role: 'impl', force: false, confirmation: 'INSTALL HOD ROLE', projectRoot: '/tmp/escape',
+  } }), { status: 400, body: { error: { code: 'ERR_INVALID_BODY', message: 'Request body is invalid' } } });
+  assert.deepEqual(await controller.handle({ method: 'GET', path: '/api/settings?workspaceId=w1&cwd=/tmp/escape' }), {
+    status: 400, body: { error: { code: 'ERR_INVALID_QUERY', message: 'Settings query is invalid' } },
   });
-  const controller = createGlobalObserverApiController(protectedOptionFixture(forbiddenStore));
-  for (const request of [
-    { method: 'GET', path: '/api/settings' },
-    { method: 'POST', path: '/api/settings/hod', body: { role: 'impl' } },
-    { method: 'POST', path: '/api/settings/herdr', body: { key: 'theme.name', value: 'terminal' } },
+  assert.equal((await controller.handle({ method: 'POST', path: '/api/settings/hod?projectRoot=/tmp/escape', body: {
+    workspaceId: 'w1', role: 'impl', force: false, confirmation: 'INSTALL HOD ROLE',
+  } })).body.error.code, 'ERR_INVALID_QUERY');
+  for (const [path, body] of [
+    ['/api/settings/hod', { workspaceId: 'w1', role: 'impl', force: false, confirmation: 'INSTALL HOD ROLE', secret: 'drop' }],
+    ['/api/settings/herdr', { workspaceId: 'w1', key: 'theme.name', value: 'terminal', confirmation: 'APPLY HERDR SETTING', worktreePath: '/tmp/escape' }],
   ]) {
-    assert.deepEqual(await controller.handle(request), { status: 404, body: { error: { code: 'ERR_ROUTE' } } });
+    assert.deepEqual(await controller.handle({ method: 'POST', path, body }), {
+      status: 400, body: { error: { code: 'ERR_INVALID_BODY', message: 'Request body is invalid' } },
+    });
   }
+  assert.deepEqual(calls, [['get', null], ['get', 'w1']]);
 });
 
 test('transcript selection is read-only and strips unapproved fields', async () => {

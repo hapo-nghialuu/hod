@@ -94,19 +94,19 @@ test('open, error, and bounded resync signals refresh runtime and settings', asy
   sync.stop();
 });
 
-test('observer capabilities skip settings while legacy settings 404 remains a failure', async () => {
-  const clock = timers(); const sources = []; const statuses = []; let phase = 0; let settingsCalls = 0;
+test('observer settings failures remain safe when the capability is enabled', async () => {
+  const clock = timers(); const sources = []; const statuses = []; let settingsCalls = 0;
   const api = {
-    getState: async () => ({ capabilities: { settings: phase++ > 0 } }),
+    getState: async () => ({ capabilities: { settings: true } }),
     getSettings: async () => { settingsCalls += 1; throw Object.assign(new Error('route'), { status: 404 }); },
     openEvents: (handlers) => { const source = new FakeSource(handlers); sources.push(source); return source; },
   };
   const sync = createRuntimeSync({ api, setTimeoutImpl: clock.setTimeout, clearTimeoutImpl: clock.clearTimeout,
     onStatus: (message, code) => statuses.push([message, code]) });
   sync.open(); sources[0].emit('open'); await flush();
-  assert.equal(settingsCalls, 0); assert.deepEqual(statuses, []);
-  sources[0].emit('resync', {}); await flush();
   assert.equal(settingsCalls, 1); assert.deepEqual(statuses.at(-1), ['refresh failed', 'ERR_UNAVAILABLE']);
+  sources[0].emit('resync', {}); await flush();
+  assert.equal(settingsCalls, 2); assert.deepEqual(statuses.at(-1), ['refresh failed', 'ERR_UNAVAILABLE']);
   sync.stop();
 });
 
@@ -185,5 +185,34 @@ test('a late failed refresh cannot overwrite a newer connection refresh', async 
   assert.deepEqual(states, [{ revision: 1 }, { revision: 2 }]); assert.deepEqual(settings, [{ revision: 2 }]);
   resolveSettings({ revision: 1 }); await flush();
   assert.deepEqual(settings, [{ revision: 2 }]);
+  sync.stop();
+});
+
+test('an in-flight old-target refresh cannot overwrite a newly selected workspace', async () => {
+  const selected = { workspaceId: null }; const settingsValues = []; const requested = [];
+  let resolveOld;
+  const api = {
+    getState: async () => ({ capabilities: { settings: true } }),
+    getSettings: (workspaceId) => {
+      requested.push(workspaceId);
+      if (requested.length === 1) return new Promise((resolve) => { resolveOld = resolve; });
+      return Promise.resolve({ selectedWorkspaceId: requested.length === 2 ? 'w2' : 'w1', revision: requested.length });
+    },
+  };
+  const sync = createRuntimeSync({ api, getState: () => ({ selectedWorkspace: selected.workspaceId }), onSettings: (value) => settingsValues.push(value) });
+  const oldRefresh = sync.refresh('manual'); await flush();
+  assert.deepEqual(requested, [null]);
+  selected.workspaceId = 'w2';
+  sync.invalidateSettings();
+  resolveOld({ selectedWorkspaceId: null, revision: 1 });
+  await oldRefresh; await flush();
+  assert.deepEqual(settingsValues, []);
+
+  await sync.refresh('sse');
+  assert.deepEqual(requested, [null, 'w2']);
+  assert.deepEqual(settingsValues, [{ selectedWorkspaceId: 'w2', revision: 2 }]);
+  await sync.refresh('manual');
+  assert.deepEqual(requested, [null, 'w2', 'w2']);
+  assert.deepEqual(settingsValues, [{ selectedWorkspaceId: 'w2', revision: 2 }]);
   sync.stop();
 });

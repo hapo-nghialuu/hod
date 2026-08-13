@@ -25,6 +25,7 @@ export function createRuntimeSync(options = {}) {
   let retryTimer = null;
   let retryDelay = retryMinMs;
   let refreshGeneration = 0;
+  let settingsGeneration = 0;
   let stopped = false;
   let settingsEnabled = true;
 
@@ -64,8 +65,15 @@ export function createRuntimeSync(options = {}) {
       if (stopped || requestGeneration !== refreshGeneration) return options.getState?.() ?? null;
       if (settingsEnabled && typeof api.getSettings === 'function') {
         try {
-          const settings = await api.getSettings();
-          if (!stopped && requestGeneration === refreshGeneration && settingsEnabled) {
+          const selectedWorkspace = options.getState?.()?.selectedWorkspace ?? null;
+          const settingsRequestGeneration = settingsGeneration;
+          const settings = await api.getSettings(selectedWorkspace);
+          const currentWorkspace = options.getState?.()?.selectedWorkspace ?? null;
+          const responseWorkspace = settings?.selectedWorkspaceId;
+          const responseMatches = !Object.hasOwn(settings ?? {}, 'selectedWorkspaceId')
+            || (responseWorkspace == null ? null : String(responseWorkspace)) === currentWorkspace;
+          if (!stopped && requestGeneration === refreshGeneration && settingsGeneration === settingsRequestGeneration
+            && currentWorkspace === selectedWorkspace && responseMatches && settingsEnabled) {
             try { options.onSettings?.(settings); } catch (error) { failure ??= error; }
           }
         } catch (error) { failure ??= error; }
@@ -122,5 +130,7 @@ export function createRuntimeSync(options = {}) {
     closeSource();
   }
 
-  return Object.freeze({ open, refresh, stop });
+  function invalidateSettings() { settingsGeneration += 1; }
+
+  return Object.freeze({ open, refresh, stop, invalidateSettings });
 }

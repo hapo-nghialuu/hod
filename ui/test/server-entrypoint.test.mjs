@@ -32,6 +32,8 @@ test('wires port 0, exact options, shared API/SSE, and token only in fragment', 
   assert.equal(fixture.calls.listen, 0);
   assert.equal(fixture.calls.randomSize, 32);
   assert.equal(fixture.calls.runtime.hodRoleSettingsOptions.hodBin, '/exact/hod');
+  assert.equal(fixture.calls.runtime.projectRoot, '/project');
+  assert.equal(fixture.calls.runtime.hodRoleSettingsOptions.projectRoot, '/project');
   assert.equal(fixture.calls.runtime.herdrConfigSettingsOptions.configPath, '/config.toml');
   assert.equal(fixture.calls.http.apiController, fixture.runtime.apiController);
   assert.equal(fixture.calls.http.sseHub, fixture.runtime.sseHub);

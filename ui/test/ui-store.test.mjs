@@ -11,6 +11,26 @@ function response(value, status = 200) {
   return { status, ok: status >= 200 && status < 300, json: async () => value };
 }
 
+test('project settings API sends workspace IDs but never browser paths', async () => {
+  const calls = [];
+  const client = createApiClient({
+    fetchImpl: async (path, init) => { calls.push({ path, init }); return response({}); },
+  });
+  await client.getSettings('space/one');
+  await client.saveHodSettings({ workspaceId: 'space/one', role: 'impl', force: false, confirmation: 'INSTALL HOD ROLE' });
+  await client.saveHerdrSetting({ workspaceId: 'space/one', key: 'theme.name', value: 'terminal', confirmation: 'APPLY HERDR SETTING' });
+  assert.equal(calls[0].path, '/api/settings?workspaceId=space%2Fone');
+  for (const call of calls) {
+    const body = call.init.body ? JSON.parse(call.init.body) : {};
+    assert.equal(Object.hasOwn(body, 'workspaceId'), call.path !== calls[0].path);
+    assert.equal(Object.keys(body).some((key) => ['path', 'cwd', 'projectRoot'].includes(key)), false);
+  }
+  const legacyCalls = [];
+  const legacyClient = createApiClient({ fetchImpl: async (path, init) => { legacyCalls.push({ path, init }); return response({}); } });
+  await legacyClient.saveHodSettings({ role: 'impl', force: false, confirmation: 'INSTALL HOD ROLE' });
+  assert.equal(Object.hasOwn(JSON.parse(legacyCalls[0].init.body), 'workspaceId'), false);
+});
+
 function consoleElement(attributes = {}) {
   const listeners = {};
   return {

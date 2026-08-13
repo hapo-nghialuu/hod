@@ -1,11 +1,42 @@
+import { HOD_ROLE_SETTINGS_ERROR_CODES } from './settings/hod-role-inspector.mjs';
+import { HERDR_CONFIG_SETTINGS_ERROR_CODES } from './settings/herdr-config-settings.mjs';
+
 export const GLOBAL_OBSERVER_CAPABILITIES = Object.freeze({
-  settings: false,
+  settings: true,
   control: false,
-  mutation: false,
+  mutation: true,
 });
 
-const SETTINGS_ROUTES = new Set(['/api/settings', '/api/settings/hod', '/api/settings/herdr']);
 const MAX_PANE_ID_LENGTH = 256;
+const SETTINGS_ERROR_DEFINITIONS = new Map([
+  ['ERR_INVALID_BODY', [400, 'Request body is invalid']],
+  ['ERR_WORKSPACE_ID', [400, 'Workspace ID is invalid']],
+  ['ERR_WORKSPACE_REQUIRED', [400, 'A workspace must be selected']],
+  ['ERR_WORKSPACE_NOT_FOUND', [404, 'Workspace was not found']],
+  ['ERR_WORKSPACE_AMBIGUOUS', [409, 'Workspace target is ambiguous']],
+  ['ERR_WORKSPACE_UNSAFE', [409, 'Workspace target is unsafe']],
+  ['ERR_WORKSPACE_SNAPSHOT', [503, 'Workspace snapshot is unavailable']],
+  ['ERR_SETTINGS_UNAVAILABLE', [503, 'Settings are unavailable']],
+  [HOD_ROLE_SETTINGS_ERROR_CODES.CONFIG, [400, 'Invalid HOD settings request']],
+  [HOD_ROLE_SETTINGS_ERROR_CODES.UNKNOWN_ROLE, [400, 'HOD role is not allowed']],
+  [HOD_ROLE_SETTINGS_ERROR_CODES.CONFIRMATION, [400, 'Confirmation is invalid']],
+  [HOD_ROLE_SETTINGS_ERROR_CODES.FORCE_REQUIRED, [409, 'HOD role overwrite requires force']],
+  [HOD_ROLE_SETTINGS_ERROR_CODES.UNSAFE, [409, 'HOD role destination is unsafe']],
+  [HERDR_CONFIG_SETTINGS_ERROR_CODES.CONFIG, [400, 'Invalid Herdr settings request']],
+  [HERDR_CONFIG_SETTINGS_ERROR_CODES.KEY, [400, 'Herdr setting key is not allowed']],
+  [HERDR_CONFIG_SETTINGS_ERROR_CODES.VALUE, [400, 'Herdr setting value is invalid']],
+  [HERDR_CONFIG_SETTINGS_ERROR_CODES.CONFIRMATION, [400, 'Confirmation is invalid']],
+  ['ERR_HERDR_CONFIG_CHANGED', [409, 'Herdr config changed during update']],
+  ['ERR_SETTINGS_RESPONSE', [500, 'Settings service response is invalid']],
+]);
+const FORBIDDEN_QUERY_KEYS = new Set([
+  'path', 'cwd', 'foreground_cwd', 'foregroundCwd', 'project', 'projectRoot', 'project_root',
+  'checkoutPath', 'checkout_path', 'worktree', 'worktreeRoot', 'worktree_root', 'directory', 'root',
+]);
+const SETTINGS_BODY_KEYS = Object.freeze({
+  hod: new Set(['workspaceId', 'role', 'force', 'confirmation']),
+  herdr: new Set(['workspaceId', 'key', 'value', 'confirmation']),
+});
 
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -25,6 +56,30 @@ function routePath(request) {
 
 function methodOf(request) {
   return typeof request?.method === 'string' ? request.method.toUpperCase() : '';
+}
+
+function queryOf(request) {
+  const value = request?.path ?? request?.pathname ?? request?.url;
+  if (typeof value !== 'string') return null;
+  try { return new URL(value, 'http://hod.local').searchParams; } catch { return null; }
+}
+
+function settingsWorkspaceId(request) {
+  const query = queryOf(request);
+  if (!query) return { error: 'ERR_INVALID_QUERY' };
+  for (const key of query.keys()) if (key !== 'workspaceId' || FORBIDDEN_QUERY_KEYS.has(key)) return { error: 'ERR_INVALID_QUERY' };
+  const values = query.getAll('workspaceId');
+  if (values.length > 1 || values[0] === '') return { error: 'ERR_WORKSPACE_ID' };
+  return { workspaceId: values[0] ?? null };
+}
+
+function settingsBody(body, kind) {
+  if (!record(body)) return null;
+  const allowed = SETTINGS_BODY_KEYS[kind];
+  if (!allowed || Reflect.ownKeys(body).some((key) => typeof key !== 'string' || !allowed.has(key))) return null;
+  const output = {};
+  for (const key of allowed) if (Object.hasOwn(body, key)) output[key] = body[key];
+  return output;
 }
 
 function runtimeSnapshot(store) {
@@ -54,12 +109,17 @@ function publicTranscript(value, paneId) {
   return output;
 }
 
-function settingsRouteError() { return response(404, { error: { code: 'ERR_ROUTE' } }); }
+function publicSettingsError(error, fallbackCode = 'ERR_SETTINGS_READ', fallbackMessage = 'Unable to read settings') {
+  const definition = SETTINGS_ERROR_DEFINITIONS.get(error?.code);
+  if (definition) return errorResponse(definition[0], error.code, definition[1]);
+  return errorResponse(500, fallbackCode, fallbackMessage);
+}
 
 export class GlobalObserverApiController {
-  constructor({ runtimeStore, store, selectTranscript } = {}) {
+  constructor({ runtimeStore, store, selectTranscript, settingsController, settings } = {}) {
     this.store = runtimeStore ?? store;
     this.selectTranscript = selectTranscript;
+    this.settingsController = settingsController ?? settings ?? null;
     if (!this.store) throw new TypeError('runtime store is required');
     this.capabilities = GLOBAL_OBSERVER_CAPABILITIES;
   }
@@ -68,7 +128,27 @@ export class GlobalObserverApiController {
     const input = typeof request === 'string' ? { method: request, path, body } : request;
     const method = methodOf(input);
     const pathname = routePath(input);
-    if (SETTINGS_ROUTES.has(pathname)) return settingsRouteError();
+    if (method === 'GET' && pathname === '/api/settings') {
+      const getSettings = this.settingsController?.get ?? this.settingsController?.getSettings;
+      if (typeof getSettings !== 'function') return publicSettingsError(null, 'ERR_SETTINGS_UNAVAILABLE', 'Settings are unavailable');
+      const selected = settingsWorkspaceId(input);
+      if (selected.error === 'ERR_INVALID_QUERY') return errorResponse(400, selected.error, 'Settings query is invalid');
+      if (selected.error) return publicSettingsError({ code: selected.error });
+      try { return response(200, await getSettings.call(this.settingsController, selected.workspaceId)); }
+      catch (error) { return publicSettingsError(error); }
+    }
+    if (method === 'POST' && (pathname === '/api/settings/hod' || pathname === '/api/settings/herdr')) {
+      const query = settingsWorkspaceId(input);
+      if (query.error === 'ERR_INVALID_QUERY') return errorResponse(400, query.error, 'Settings query is invalid');
+      if (query.error) return publicSettingsError({ code: query.error });
+      const body = settingsBody(input?.body, pathname.endsWith('/hod') ? 'hod' : 'herdr');
+      if (!body) return errorResponse(400, 'ERR_INVALID_BODY', 'Request body is invalid');
+      const handler = pathname.endsWith('/hod') ? this.settingsController?.postHod ?? this.settingsController?.updateHod
+        : this.settingsController?.postHerdr ?? this.settingsController?.updateHerdr;
+      if (typeof handler !== 'function') return publicSettingsError(null, 'ERR_SETTINGS_UNAVAILABLE', 'Settings are unavailable');
+      try { return response(200, await handler.call(this.settingsController, body)); }
+      catch (error) { return publicSettingsError(error, 'ERR_SETTINGS_UPDATE', 'Unable to update settings'); }
+    }
     if (method === 'GET' && pathname === '/api/state') {
       try { return response(200, stateWithCapabilities(runtimeSnapshot(this.store))); }
       catch { return errorResponse(500, 'ERR_RUNTIME_STATE', 'Unable to read runtime state'); }

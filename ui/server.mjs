@@ -1,10 +1,9 @@
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 
 import { parseRuntimeOptions } from './server/runtime-options.mjs';
-import { resolveApplicationPaths } from './server/application-paths.mjs';
+import { resolveApplicationPaths, resolveRuntimeApplicationPaths } from './server/application-paths.mjs';
 import { openBrowser } from './server/browser-launcher.mjs';
 import { createLiveConsoleRuntime } from './server/live-console-runtime.mjs';
 import { createGlobalObserverRuntime } from './server/global-observer-runtime.mjs';
@@ -65,11 +64,7 @@ function removeSignal(processRef, signal, handler) {
 export function isDirectEntry(argv = process.argv, entryFile = ENTRY_FILE) { return directEntry(argv, entryFile); }
 
 function runtimeOnlyPaths({ entryFile, env, herdrBin, hodBin }) {
-  return Object.freeze({
-    publicRoot: join(dirname(entryFile), 'public'),
-    herdrBin: herdrBin ?? env?.HERDR_BIN ?? 'herdr',
-    ...(hodBin === undefined ? {} : { hodBin }),
-  });
+  return resolveRuntimeApplicationPaths({ entryFile, env, herdrBin, hodBin });
 }
 
 export async function startHodUi(options = {}) {
@@ -110,6 +105,9 @@ export async function startHodUi(options = {}) {
     runtime = options.runtime ?? (runtimeOnly
       ? runtimeFactory({
         runtimeOnly: true, env, herdrBin: paths.herdrBin, publicRoot: paths.publicRoot,
+        ...(paths.templatesRoot ? { templatesRoot: paths.templatesRoot } : {}),
+        ...(paths.configPath ? { configPath: paths.configPath } : {}),
+        ...(paths.hodBin ? { hodBin: paths.hodBin } : {}),
       })
       : runtimeFactory({
         projectRoot: paths.projectRoot, templatesRoot: paths.templatesRoot, configPath: paths.configPath,

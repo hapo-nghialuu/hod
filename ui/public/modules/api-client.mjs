@@ -103,22 +103,24 @@ export function createApiClient(options = {}) {
     getState() {
       return request('/api/state');
     },
-    getSettings() {
-      return request('/api/settings');
+    getSettings(workspaceId = null) {
+      const query = workspaceId === null || workspaceId === undefined ? ''
+        : `?workspaceId=${encodeURIComponent(String(workspaceId))}`;
+      return request(`/api/settings${query}`);
     },
     selectTranscript(paneId) {
       return request('/api/transcript/select', { method: 'POST', body: { paneId } });
     },
-    saveHodSettings({ role, force, confirmation } = {}) {
+    saveHodSettings({ workspaceId, role, force, confirmation } = {}) {
       return request('/api/settings/hod', {
         method: 'POST',
-        body: { role, force, confirmation },
+        body: { workspaceId, role, force, confirmation },
       });
     },
-    saveHerdrSetting({ key, value, confirmation } = {}) {
+    saveHerdrSetting({ workspaceId, key, value, confirmation } = {}) {
       return request('/api/settings/herdr', {
         method: 'POST',
-        body: { key, value, confirmation },
+        body: { workspaceId, key, value, confirmation },
       });
     },
     openEvents(handlers = {}) {

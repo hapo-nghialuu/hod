@@ -95,4 +95,21 @@ export function resolveApplicationPaths(options = {}) {
   });
 }
 
+/** Resolve observer assets and global config without selecting a project. */
+export function resolveRuntimeApplicationPaths(options = {}) {
+  const fsApi = options.fsApi ?? null;
+  const entryFile = options.entryFile ?? fileURLToPath(import.meta.url);
+  const entryDirectory = dirname(absolute(entryFile, SAFE_CODES.PUBLIC));
+  const repositoryRoot = dirname(entryDirectory);
+  const publicRoot = canonicalDirectory(join(entryDirectory, 'public'), SAFE_CODES.PUBLIC, fsApi, true);
+  const templatesRoot = canonicalDirectory(join(repositoryRoot, 'templates'), SAFE_CODES.TEMPLATES, fsApi, true);
+  const hodBin = options.hodBin ?? join(repositoryRoot, 'bin', 'hod');
+  if (typeof hodBin !== 'string' || hodBin.trim() === '') fail(SAFE_CODES.HOD);
+  return Object.freeze({
+    repositoryRoot, publicRoot, templatesRoot,
+    configPath: configPath(options.env ?? process.env, fsApi), hodBin,
+    herdrBin: options.herdrBin ?? options.env?.HERDR_BIN ?? 'herdr',
+  });
+}
+
 export const deriveApplicationPaths = resolveApplicationPaths;

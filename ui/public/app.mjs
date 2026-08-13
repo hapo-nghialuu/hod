@@ -87,6 +87,10 @@ export function bootstrapApp(options = {}) {
   const settingsView = createSettingsView({
     documentRef,
     store,
+    onWorkspaceStart: () => sync.invalidateSettings?.(),
+    onWorkspaceSelect: (workspaceId) => api.getSettings(workspaceId),
+    onWorkspaceLoaded: (workspaceId) => statusbar(store, workspaceId ? 'project settings loaded' : 'project target cleared', 'OK'),
+    onWorkspaceError: (error) => statusbar(store, 'project settings failed', publicErrorCode(error)),
     async onHodSave(request) {
       try {
         await api.saveHodSettings(request);
