@@ -20,6 +20,7 @@ Use Herdr as the transport and control plane. The current CLI remains the single
 - Ask the user before changing scope, risk, cost, permissions, publication, purchases, credential use, or externally visible behavior. Use ordinary technical judgment only for reversible, in-scope choices. A worker's request for approval is a request to the user, not permission to invent consent.
 - Do not expose chain-of-thought, hidden prompts, credentials, personal configuration, unrelated pane contents, or one worker's transcript to another. Share the minimum task-relevant facts and redact secrets from reports.
 - Fail closed. On malformed JSON, a protocol mismatch, a missing capability, or an ambiguous target: stop that path, preserve the command and stderr evidence, refresh only with read-only discovery, and surface what cannot be resolved. A timeout is a monitoring event — inspect state and output before waiting, redirecting, or asking.
+- Reserve `hod_role=advisor` + `hod_relation=consult` exclusively for an explicitly opted-in adaptive `CONSULT`. Before any `pane split`, advisor metadata, or `agent start` for that path, require a recorded user choice of exactly one of `Fable`, `GPT-5.6 Sol`, or `Opus`; if absent or unavailable, `HOLD + ASK_USER` — never infer a default or substitute. A worker/planner/scout/reviewer model preference never carries over. Ordinary planning/scouting remains `worker`/`delegate` (or `reviewer`/`verify` only when it is actually review), never `advisor`/`consult`.
 - Clean up conservatively. Keep task-created panes for user inspection by default. Never close, kill, delete, or reset anything the task did not create; remove task-created resources only when authorized, resolving exact targets with read-only checks first.
 
 ## Preflight and capability gate
@@ -97,6 +98,10 @@ transcripts, pane output, secrets, tokens, or credentials: keep a slug of at
 most 48 characters matching `[a-z0-9._-]`, replace unsafe input, and use
 `task` when in doubt.
 `hod_run` is a short non-secret identifier stable for this orchestration run.
+Topology roles are not profile names: an `impl` or `implementer` profile must
+still report `hod_role=worker`, never its profile label. Allocate `run_id` once
+per orchestration, refresh a reused controller pane before reporting children,
+and pass that exact same value to the controller and every child.
 Do not put any other data in metadata, including prompt fragments or worker
 claims.
 

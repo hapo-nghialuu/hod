@@ -358,6 +358,12 @@ output, secret, token, or credential. The run ID is a short non-secret value
 shared by this run. If either value cannot be made safe, use a neutral fixed
 label; never forward arbitrary text.
 
+Do not copy a permission-profile name into `hod_role`: `impl` and
+`implementer` profiles report `worker`. Create one `run_id` for the run and
+reuse its exact bytes for the controller and every child. When a controller
+pane is reused for a new run, refresh that controller before reporting or
+starting any child so the UI never observes mixed run IDs.
+
 Run the helper at the existing lifecycle points: controller pre-dispatch;
 immediately after split and before start; after a successful start; after a
 redirect has resolved and delivered the target prompt; and during harvest,

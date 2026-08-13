@@ -194,6 +194,12 @@ for role, relation in (
 ):
     if not any(role in line and relation in line for line in lines):
         raise SystemExit(f"missing {role}/{relation} mapping")
+if not re.search(r"impl.*implementer.*report.*worker", text, re.I | re.S):
+    raise SystemExit("implementation profiles are not pinned to worker topology")
+if not re.search(r"run_id.*controller.*every child", text, re.I | re.S):
+    raise SystemExit("shared controller/child run ID contract is missing")
+if not re.search(r"controller pane.*reused.*refresh.*before.*child", text, re.I | re.S):
+    raise SystemExit("reused-controller run refresh contract is missing")
 PY
 }
 

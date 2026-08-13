@@ -100,6 +100,23 @@ def require_patterns(label, text, patterns):
             raise SystemExit(f"{label}: missing {detail}")
 
 
+always_loaded_contract = flattened(
+    markdown_section(skill, "## Non-negotiable contract")
+)
+require_patterns(
+    "SKILL advisor dispatch guard",
+    always_loaded_contract,
+    {
+        "CONSULT-only advisor metadata": r"Reserve hod_role=advisor \+ hod_relation=consult exclusively for an explicitly opted-in adaptive CONSULT",
+        "recorded allowed model gate before dispatch": r"Before any pane split, advisor metadata, or agent start for that path, require a recorded user choice of exactly one of Fable, GPT-5\.6 Sol, or Opus",
+        "missing or unavailable selection hold": r"if absent or unavailable, HOLD \+ ASK_USER",
+        "no inherited default or substitution": r"never infer a default or substitute",
+        "no inherited worker preference": r"A worker/planner/scout/reviewer model preference never carries over",
+        "ordinary non-advisor classification": r"Ordinary planning/scouting remains worker/delegate \(or reviewer/verify only when it is actually review\), never advisor/consult",
+    },
+)
+
+
 adaptive_reference = (root / "references/coordinator-advisor.md").read_text(
     encoding="utf-8"
 )
