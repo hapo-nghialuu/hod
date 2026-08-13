@@ -85,6 +85,22 @@ expect_rejection() {
   fi
 }
 
+expect_rejection_contains() {
+  local name=$1
+  local needle=$2
+  shift 2
+  local out
+  if out=$("$@" 2>&1); then
+    printf '  output: %s\n' "$out" >&2
+    record "$name" false
+  elif [[ "$out" == *"$needle"* ]]; then
+    record "$name" true
+  else
+    printf '  output: %s\n' "$out" >&2
+    record "$name" false
+  fi
+}
+
 expect_output_contains() {
   local name=$1
   local needle=$2
@@ -540,13 +556,215 @@ pinned_tag_is() {
   [[ "$(git -C "$pin_home/skill" describe --tags --exact-match 2>/dev/null)" == "$want" ]]
 }
 expect_success 'pinned checkout sits at the requested tag' pinned_tag_is vt1
+git -C "$pin_home/skill" branch vt2 HEAD
 
 expect_success 'update on a pinned checkout moves to the newest tag' \
   "${pin_env[@]}" "$hod" update
 expect_success 'pinned checkout now at the newest tag' pinned_tag_is vt2
+pinned_checkout_is_detached_exact_tag() {
+  ! git -C "$pin_home/skill" symbolic-ref -q HEAD >/dev/null 2>&1 || return 1
+  [[ "$(git -C "$pin_home/skill" rev-parse HEAD)" == \
+    "$(git -C "$pin_home/skill" rev-parse 'refs/tags/vt2^{commit}')" ]]
+}
+expect_success 'pinned update ignores a same-name local branch' \
+  pinned_checkout_is_detached_exact_tag
 
 expect_success 'doctor reports pinned mode' \
   bash -c "$(printf '%q ' "${pin_env[@]:1}") '$hod' doctor 2>/dev/null | grep -q 'pinned to tag vt2'"
+
+# A configured upstream must be merged by its canonical full ref. A tag named
+# like the abbreviated remote ref must not shadow refs/remotes/origin/<branch>.
+upstream_collision_home=$tmp_root/upstream-collision-home
+upstream_collision_env=(env HOD_HOME="$upstream_collision_home" \
+  HOD_BIN_DIR="$tmp_root/upstream-collision-bin" \
+  HOD_CLAUDE_DIR="$tmp_root/upstream-collision-claude" \
+  HOD_AGENTS_DIR="$tmp_root/upstream-collision-agents")
+mkdir -p -- "$upstream_collision_home" "$tmp_root/upstream-collision-bin" \
+  "$tmp_root/upstream-collision-claude" "$tmp_root/upstream-collision-agents"
+expect_success 'install fixture for abbreviated upstream collision' \
+  "${upstream_collision_env[@]}" "$hod" install
+upstream_collision_skill=$upstream_collision_home/skill
+upstream_collision_branch=$(git -C "$upstream_collision_skill" symbolic-ref --short HEAD)
+git -C "$upstream_collision_skill" tag \
+  "origin/$upstream_collision_branch" HEAD
+# Leave the configured upstream in branch.* config but force update to recreate
+# its remote-tracking ref, so a short collision cannot be rescued by Git's
+# abbreviation heuristics.
+git -C "$upstream_collision_skill" update-ref -d \
+  "refs/remotes/origin/$upstream_collision_branch"
+printf 'marker canonical upstream ref\n' >>"$src_repo/README.md"
+git -C "$src_repo" add README.md
+git -C "$src_repo" commit -q -m "advance canonical upstream ref fixture"
+upstream_collision_update() {
+  local before after remote_ref
+  before=$(git -C "$upstream_collision_skill" rev-parse HEAD)
+  "${upstream_collision_env[@]}" "$hod" update >/dev/null 2>&1 || return 1
+  after=$(git -C "$upstream_collision_skill" rev-parse HEAD)
+  remote_ref="refs/remotes/origin/$upstream_collision_branch"
+  [[ "$before" != "$after" ]] || return 1
+  [[ "$after" == "$(git -C "$upstream_collision_skill" rev-parse "$remote_ref")" ]] || return 1
+  git -C "$upstream_collision_skill" show HEAD:README.md | \
+    grep -qF 'marker canonical upstream ref'
+}
+expect_success 'configured upstream ignores same-name tag' \
+  upstream_collision_update
+
+# A branch without configured upstream must resolve its unique same-name remote
+# branch after fetch instead of letting `git pull --ff-only` fail with Git's
+# generic "no tracking information" error.
+no_upstream_home=$tmp_root/no-upstream-home
+no_upstream_env=(env HOD_HOME="$no_upstream_home" HOD_BIN_DIR="$tmp_root/no-upstream-bin" \
+  HOD_CLAUDE_DIR="$tmp_root/no-upstream-claude" HOD_AGENTS_DIR="$tmp_root/no-upstream-agents")
+mkdir -p -- "$no_upstream_home" "$tmp_root/no-upstream-bin" \
+  "$tmp_root/no-upstream-claude" "$tmp_root/no-upstream-agents"
+
+expect_success 'install fixture for branch without upstream' \
+  "${no_upstream_env[@]}" "$hod" install
+
+no_upstream_skill=$no_upstream_home/skill
+no_upstream_branch=$(git -C "$no_upstream_skill" symbolic-ref --short HEAD)
+expect_success 'fixture branch starts with configured upstream' \
+  git -C "$no_upstream_skill" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'
+
+printf 'marker tracking upstream\n' >>"$src_repo/README.md"
+git -C "$src_repo" add README.md
+git -C "$src_repo" commit -q -m "advance tracking upstream branch"
+update_tracking_branch() {
+  "${no_upstream_env[@]}" "$hod" update >/dev/null 2>&1 || return 1
+  [[ "$(git -C "$no_upstream_skill" symbolic-ref --short HEAD)" == "$no_upstream_branch" ]] || return 1
+  git -C "$no_upstream_skill" show HEAD:README.md | \
+    grep -qF 'marker tracking upstream'
+}
+expect_success 'update fast-forwards configured upstream' update_tracking_branch
+
+git -C "$no_upstream_skill" branch --unset-upstream
+
+printf 'marker no-upstream remote\n' >>"$src_repo/README.md"
+git -C "$src_repo" add README.md
+git -C "$src_repo" commit -q -m "advance no-upstream remote branch"
+
+update_no_upstream_unique() {
+  local before after
+  before=$(git -C "$no_upstream_skill" rev-parse HEAD)
+  "${no_upstream_env[@]}" "$hod" update >/dev/null 2>&1 || return 1
+  after=$(git -C "$no_upstream_skill" rev-parse HEAD)
+  [[ "$before" != "$after" ]] || return 1
+  [[ "$(git -C "$no_upstream_skill" symbolic-ref --short HEAD)" == "$no_upstream_branch" ]] || return 1
+  git -C "$no_upstream_skill" show HEAD:README.md | \
+    grep -qF 'marker no-upstream remote' || return 1
+  ! git -C "$no_upstream_skill" rev-parse --abbrev-ref --symbolic-full-name \
+    '@{upstream}' >/dev/null 2>&1
+}
+expect_success 'update fast-forwards unique same-name remote without upstream' \
+  update_no_upstream_unique
+
+orphan_branch=orphan-update
+git -C "$no_upstream_skill" checkout --quiet -b "$orphan_branch"
+printf 'orphan local commit\n' >"$no_upstream_skill/orphan-local.txt"
+git -C "$no_upstream_skill" add orphan-local.txt
+git -C "$no_upstream_skill" commit -q -m "keep orphan local commit"
+orphan_head_before=$(git -C "$no_upstream_skill" rev-parse HEAD)
+orphan_branch_before=$(git -C "$no_upstream_skill" symbolic-ref --short HEAD)
+orphan_status_before=$(git -C "$no_upstream_skill" status --porcelain)
+orphan_update_preserves_state() {
+  [[ "$(git -C "$no_upstream_skill" rev-parse HEAD)" == "$orphan_head_before" ]] || return 1
+  [[ "$(git -C "$no_upstream_skill" symbolic-ref --short HEAD)" == "$orphan_branch_before" ]] || return 1
+  [[ "$(git -C "$no_upstream_skill" status --porcelain)" == "$orphan_status_before" ]] || return 1
+  git -C "$no_upstream_skill" show HEAD:orphan-local.txt | \
+    grep -qF 'orphan local commit'
+}
+expect_rejection_contains 'orphan branch fails with stable error' \
+  "branch '$orphan_branch' has no upstream and no unique remote branch named '$orphan_branch'" \
+  "${no_upstream_env[@]}" "$hod" update
+expect_success 'orphan update preserves HEAD, branch, worktree, and local commit' \
+  orphan_update_preserves_state
+
+ambiguous_home=$tmp_root/ambiguous-home
+ambiguous_env=(env HOD_HOME="$ambiguous_home" HOD_BIN_DIR="$tmp_root/ambiguous-bin" \
+  HOD_CLAUDE_DIR="$tmp_root/ambiguous-claude" HOD_AGENTS_DIR="$tmp_root/ambiguous-agents")
+mkdir -p -- "$ambiguous_home" "$tmp_root/ambiguous-bin" \
+  "$tmp_root/ambiguous-claude" "$tmp_root/ambiguous-agents"
+expect_success 'install fixture for ambiguous remote branches' \
+  "${ambiguous_env[@]}" "$hod" install
+ambiguous_skill=$ambiguous_home/skill
+ambiguous_branch=$(git -C "$ambiguous_skill" symbolic-ref --short HEAD)
+git -C "$ambiguous_skill" remote add backup "$src_repo"
+git -C "$ambiguous_skill" fetch --quiet backup
+git -C "$ambiguous_skill" branch --unset-upstream
+printf 'ambiguous local commit\n' >"$ambiguous_skill/ambiguous-local.txt"
+git -C "$ambiguous_skill" add ambiguous-local.txt
+git -C "$ambiguous_skill" commit -q -m "keep ambiguous local commit"
+ambiguous_head_before=$(git -C "$ambiguous_skill" rev-parse HEAD)
+ambiguous_branch_before=$(git -C "$ambiguous_skill" symbolic-ref --short HEAD)
+ambiguous_status_before=$(git -C "$ambiguous_skill" status --porcelain)
+ambiguous_update_preserves_state() {
+  [[ "$(git -C "$ambiguous_skill" rev-parse HEAD)" == "$ambiguous_head_before" ]] || return 1
+  [[ "$(git -C "$ambiguous_skill" symbolic-ref --short HEAD)" == "$ambiguous_branch_before" ]] || return 1
+  [[ "$(git -C "$ambiguous_skill" status --porcelain)" == "$ambiguous_status_before" ]] || return 1
+  git -C "$ambiguous_skill" show HEAD:ambiguous-local.txt | \
+    grep -qF 'ambiguous local commit'
+}
+expect_rejection_contains 'ambiguous remotes fail with stable error' \
+  "branch '$ambiguous_branch' has no upstream and multiple matching remote branches: backup/$ambiguous_branch, origin/$ambiguous_branch" \
+  "${ambiguous_env[@]}" "$hod" update
+expect_success 'ambiguous update preserves HEAD, branch, worktree, and local commit' \
+  ambiguous_update_preserves_state
+
+deleted_branch=deleted-update
+git -C "$src_repo" branch "$deleted_branch"
+deleted_home=$tmp_root/deleted-home
+deleted_env=(env HOD_HOME="$deleted_home" HOD_BIN_DIR="$tmp_root/deleted-bin" \
+  HOD_CLAUDE_DIR="$tmp_root/deleted-claude" HOD_AGENTS_DIR="$tmp_root/deleted-agents")
+mkdir -p -- "$deleted_home" "$tmp_root/deleted-bin" \
+  "$tmp_root/deleted-claude" "$tmp_root/deleted-agents"
+expect_success 'install fixture for deleted remote branch' \
+  "${deleted_env[@]}" "$hod" install
+deleted_skill=$deleted_home/skill
+git -C "$deleted_skill" checkout --quiet --no-track -b "$deleted_branch" \
+  "origin/$deleted_branch"
+git -C "$src_repo" branch -D "$deleted_branch" >/dev/null
+printf 'deleted remote local commit\n' >"$deleted_skill/deleted-local.txt"
+git -C "$deleted_skill" add deleted-local.txt
+git -C "$deleted_skill" commit -q -m "keep deleted remote local commit"
+deleted_head_before=$(git -C "$deleted_skill" rev-parse HEAD)
+deleted_branch_before=$(git -C "$deleted_skill" symbolic-ref --short HEAD)
+deleted_status_before=$(git -C "$deleted_skill" status --porcelain)
+deleted_update_preserves_state() {
+  [[ "$(git -C "$deleted_skill" rev-parse HEAD)" == "$deleted_head_before" ]] || return 1
+  [[ "$(git -C "$deleted_skill" symbolic-ref --short HEAD)" == "$deleted_branch_before" ]] || return 1
+  [[ "$(git -C "$deleted_skill" status --porcelain)" == "$deleted_status_before" ]] || return 1
+  ! git -C "$deleted_skill" show-ref --verify --quiet \
+    "refs/remotes/origin/$deleted_branch" || return 1
+  git -C "$deleted_skill" show HEAD:deleted-local.txt | \
+    grep -qF 'deleted remote local commit'
+}
+expect_rejection_contains 'deleted remote branch fails with stable error' \
+  "branch '$deleted_branch' has no upstream and no unique remote branch named '$deleted_branch'" \
+  "${deleted_env[@]}" "$hod" update
+expect_success 'deleted remote update preserves HEAD, branch, worktree, and local commit' \
+  deleted_update_preserves_state
+
+non_tag_home=$tmp_root/non-tag-home
+non_tag_env=(env HOD_HOME="$non_tag_home" HOD_BIN_DIR="$tmp_root/non-tag-bin" \
+  HOD_CLAUDE_DIR="$tmp_root/non-tag-claude" HOD_AGENTS_DIR="$tmp_root/non-tag-agents")
+mkdir -p -- "$non_tag_home" "$tmp_root/non-tag-bin" \
+  "$tmp_root/non-tag-claude" "$tmp_root/non-tag-agents"
+expect_success 'install fixture for detached non-tag checkout' \
+  "${non_tag_env[@]}" "$hod" install
+non_tag_skill=$non_tag_home/skill
+git -C "$non_tag_skill" checkout --quiet --detach HEAD
+non_tag_head_before=$(git -C "$non_tag_skill" rev-parse HEAD)
+non_tag_status_before=$(git -C "$non_tag_skill" status --porcelain)
+non_tag_update_preserves_state() {
+  [[ "$(git -C "$non_tag_skill" rev-parse HEAD)" == "$non_tag_head_before" ]] || return 1
+  git -C "$non_tag_skill" symbolic-ref -q HEAD >/dev/null 2>&1 && return 1
+  [[ "$(git -C "$non_tag_skill" status --porcelain)" == "$non_tag_status_before" ]]
+}
+expect_rejection_contains 'detached non-tag fails with stable error' \
+  'checkout is detached at a non-tag commit; checkout an exact tag or branch' \
+  "${non_tag_env[@]}" "$hod" update
+expect_success 'detached non-tag update preserves HEAD and worktree' \
+  non_tag_update_preserves_state
 
 # ---------------------------------------------------------------------------
 # settings profiles

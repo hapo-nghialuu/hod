@@ -858,27 +858,69 @@ cmd_update() {
     fail "skill checkout has local modifications; refuse to update. Inspect: git -C $SKILL_DIR status"
   fi
 
-  local old new
+  local old new upstream_ref current_branch
   old=$(git -C "$SKILL_DIR" rev-parse --short HEAD)
 
   # A pinned install (HOD_REF / --ref to a tag) leaves the checkout detached,
-  # where `pull --ff-only` cannot work. Move pin → newest tag instead.
+  # where branch updates cannot work. Only an exact tag is an updateable pin.
   if ! git -C "$SKILL_DIR" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    local pin_tag latest_tag
+    pin_tag=$(git -C "$SKILL_DIR" describe --tags --exact-match 2>/dev/null || true)
+    [[ -n "$pin_tag" ]] || \
+      fail "checkout is detached at a non-tag commit; checkout an exact tag or branch"
     git -C "$SKILL_DIR" fetch --tags --quiet 2>/dev/null || \
-      git -C "$SKILL_DIR" fetch --tags 2>/dev/null || true
-    local latest_tag
+      fail "failed to fetch tags; resolve manually in $SKILL_DIR"
     latest_tag=$(git -C "$SKILL_DIR" tag --sort=-v:refname | head -n 1)
     [[ -n "$latest_tag" ]] || \
-      fail "checkout is detached and no tags exist; re-run install, or checkout a branch in $SKILL_DIR"
-    git -C "$SKILL_DIR" checkout --quiet "$latest_tag" || \
+      fail "checkout is detached and no tags exist; re-run install, or checkout a branch"
+    git -C "$SKILL_DIR" checkout --quiet "refs/tags/$latest_tag" || \
       fail "failed to checkout tag: $latest_tag"
     new=$(git -C "$SKILL_DIR" rev-parse --short HEAD)
     printf 'updated pinned skill: %s → %s (%s)\n' "$old" "$new" "$latest_tag"
     return 0
   fi
 
-  git -C "$SKILL_DIR" fetch --tags --quiet 2>/dev/null || true
-  git -C "$SKILL_DIR" pull --ff-only || \
+  current_branch=$(git -C "$SKILL_DIR" symbolic-ref --quiet --short HEAD) || \
+    fail "failed to resolve current branch in $SKILL_DIR"
+  upstream_ref=$(git -C "$SKILL_DIR" for-each-ref \
+    --format='%(upstream)' "refs/heads/$current_branch")
+
+  if [[ -n "$upstream_ref" ]]; then
+    local upstream_remote
+    upstream_remote=$(git -C "$SKILL_DIR" config --get \
+      "branch.$current_branch.remote" || true)
+    if [[ -n "$upstream_remote" && "$upstream_remote" != "." ]]; then
+      git -C "$SKILL_DIR" fetch --prune --tags --quiet "$upstream_remote" 2>/dev/null || \
+        fail "failed to fetch upstream; resolve manually in $SKILL_DIR"
+    fi
+  else
+    local matching_remote_branches=()
+    local matching_remote_names=()
+    local remote
+    git -C "$SKILL_DIR" fetch --all --prune --tags --quiet 2>/dev/null || \
+      fail "failed to fetch remotes; resolve manually in $SKILL_DIR"
+    while IFS= read -r remote; do
+      [[ -n "$remote" ]] || continue
+      if git -C "$SKILL_DIR" show-ref --verify --quiet \
+        "refs/remotes/$remote/$current_branch"; then
+        matching_remote_branches+=("refs/remotes/$remote/$current_branch")
+        matching_remote_names+=("$remote/$current_branch")
+      fi
+    done < <(git -C "$SKILL_DIR" remote | LC_ALL=C sort)
+
+    if (( ${#matching_remote_branches[@]} == 0 )); then
+      fail "branch '$current_branch' has no upstream and no unique remote branch named '$current_branch'"
+    fi
+    if (( ${#matching_remote_branches[@]} > 1 )); then
+      local matching_display
+      matching_display=$(printf ', %s' "${matching_remote_names[@]}")
+      matching_display=${matching_display#, }
+      fail "branch '$current_branch' has no upstream and multiple matching remote branches: $matching_display"
+    fi
+    upstream_ref=${matching_remote_branches[0]}
+  fi
+
+  git -C "$SKILL_DIR" merge --ff-only "$upstream_ref" || \
     fail "git pull --ff-only failed; resolve manually in $SKILL_DIR"
   new=$(git -C "$SKILL_DIR" rev-parse --short HEAD)
   printf 'updated skill: %s → %s\n' "$old" "$new"
