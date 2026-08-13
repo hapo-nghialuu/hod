@@ -81,7 +81,7 @@ state does not appear in the sidebar.
 curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | sh
 
 # Or pin a release — recommended for teams, reproducible:
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.14 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.15 sh
 ```
 
 This clones the skill into `~/.hod/skill/`, puts the `hod` executable on
@@ -153,6 +153,53 @@ see "background agents" messages while the sidebar stays still, the CLI is
 using its own internal sub-agents rather than Herdr orchestration — restate the
 request with both names.
 
+## Optional: local HOD UI console
+
+The implemented local web console is available on macOS and Linux with Node.js
+20 or newer:
+
+```bash
+hod ui [--project <path>] [--port <0-65535>] [--no-open]
+```
+
+`--project` defaults to the current directory and `--port 0` lets the OS choose
+a free port. By default the command opens the browser (`open` on macOS,
+`xdg-open` on Linux); `--no-open`, or an opener failure, prints a recovery URL.
+The URL's one-time `#token` is sensitive: never share or log it. The browser
+exchanges it for a local HttpOnly/SameSite cookie and clears the fragment.
+
+The console is strictly local at `127.0.0.1` with strict Host/Origin checks and
+no remote/LAN mode. Its runtime dashboard tracks multiple workspaces/spaces
+and agents. Herdr unavailability is nonfatal; reconnect automatically clears
+stale state. Herdr state is refreshed by bounded polling, not an event-driven
+Herdr subscription. The selected-pane transcript is a RAM-only, capped 16 MiB
+UTF-8 tail and may show gap, truncated, or reconnecting markers; it is not
+persistent, byte-exact, append-only, or an audit log.
+
+The Settings view covers HOD's `controller`, `impl`, and `reviewer` roles plus
+exactly ten typed, allowlisted Herdr settings. Unknown and secret keys are not
+exposed. For the full settings matrix, confirmation/force behavior, config
+check/backup/reload flow, write-safety limits, and the residual same-user
+path-swap boundary, read [Local HOD UI console](usage-guide.md#local-hod-ui-console).
+
+### Global runtime-only observer
+
+To observe every Herdr workspace from any directory, start the foreground
+observer instead:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` is rejected and the observer ignores the current
+directory. Its dashboard shows all-space totals for spaces, agents, working,
+blocked, idle, and done; the selected transcript is a read-only, RAM-only
+display. Settings selects a live project/space by workspace ID, while the server
+resolves the current checkout without exposing its path to the browser. Missing
+or ambiguous targets fail closed. Confirmed settings mutations are enabled, but
+agent control remains disabled. The existing `hod ui` and `hod ui --project`
+paths remain unchanged.
+
 ## While a session runs
 
 | Sidebar | Meaning | What you do |
@@ -209,7 +256,7 @@ guessing. See [Usage guide](usage-guide.md) for full recipes.
 
 ## Next steps
 
-- [Quickstart](quickstart.md) — the same journey in four escalating levels
+- [Quickstart](quickstart.md) — the same journey in five escalating levels
 - [Usage guide](usage-guide.md) — prompt recipes, parallel teams, steering
 - [Portfolio orchestration](portfolio-orchestration.md) — one orchestrator,
   many projects

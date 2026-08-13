@@ -1,0 +1,177 @@
+/* runtime-view.css — spaces and terminal controls */
+.brand-prompt {
+  color: var(--fg-muted);
+}
+
+.topbar-brand {
+  text-shadow: 0 0 12px rgba(217, 119, 87, 0.24);
+}
+
+.pane-body {
+  scrollbar-color: var(--line-strong) var(--bg-sunken);
+}
+
+.pane-spaces .pane-body {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: var(--space-2);
+}
+
+.runtime-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: var(--space-1);
+  overflow: hidden;
+  background: var(--line);
+  border: var(--border-width) solid var(--line);
+}
+
+.runtime-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px var(--space-1);
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.space-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 2.25rem;
+  padding: var(--space-1) var(--space-2);
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  text-align: left;
+}
+
+.space-button:hover,
+.space-button.is-selected {
+  border-color: var(--accent);
+  background: var(--bg-raised);
+}
+
+.space-button.is-working .space-label::before {
+  display: inline-block;
+  margin-right: var(--space-1);
+  color: var(--ok-fg);
+  content: '●';
+  animation: space-active-pulse 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+@keyframes space-active-pulse {
+  50% { opacity: 0.42; transform: scale(0.82); }
+}
+
+.space-label,
+.setting-key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.space-label {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-counts {
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.space-button .tag {
+  padding: 0;
+  border: 0;
+  font-size: 9px;
+}
+
+.transcript-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--fs-xxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bracket-button {
+  min-width: var(--target);
+  color: var(--accent);
+  background: transparent;
+  border-color: var(--accent-dim);
+  text-align: center;
+}
+
+.bracket-button:hover:not(:disabled) {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.bracket-button.is-selected {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pane-transcript .pane-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.transcript-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 1.75rem;
+  padding: 2px var(--space-2);
+  border-bottom: var(--border-width) solid var(--line-faint);
+}
+
+.transcript-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-4);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  color: var(--fg);
+  background: var(--terminal-bg);
+  border: 0;
+  font-size: var(--fs-xxs);
+  font-variant-ligatures: none;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 2;
+}
+
+.ansi-bold { font-weight: 700; }
+.ansi-dim { opacity: 0.58; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; text-underline-offset: 2px; }
+.ansi-strike { text-decoration: line-through; }
+.ansi-inverse { color: var(--terminal-bg); background-color: var(--fg); }
+
+@media (max-width: 760px) {
+  .pane-transcript .pane-body { overflow: visible; }
+  .transcript-text { min-height: 20rem; max-height: 65vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .space-button.is-working .space-label::before { animation: none; }
+}

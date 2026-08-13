@@ -1,0 +1,25 @@
+/* orchestration-graph-viewport.css — direct-manipulation controls for the DAG */
+.graph-viewport-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  color: var(--fg-faint);
+  font-size: var(--fs-xxs);
+}
+.graph-viewport-hint { margin-right: auto; }
+.graph-viewport-button {
+  padding: 0;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+}
+.graph-viewport-button:hover,
+.graph-viewport-button:focus-visible {
+  color: var(--accent);
+  background: transparent;
+  outline: 1px solid var(--accent);
+}
+.graph-canvas { cursor: grab; touch-action: none; }
+.graph-canvas[data-panning] { cursor: grabbing; user-select: none; }
+@media (max-width: 760px) { .graph-viewport-hint { display: none; } }

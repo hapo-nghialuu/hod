@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark only">
+  <meta name="theme-color" content="#141413">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <title>hod — HOD UI Console</title>
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/base.css">
+  <link rel="stylesheet" href="styles/layout.css">
+  <link rel="stylesheet" href="styles/components.css">
+  <link rel="stylesheet" href="styles/runtime-view.css">
+  <link rel="stylesheet" href="styles/orchestration-graph.css">
+  <link rel="stylesheet" href="styles/orchestration-graph-viewport.css">
+  <link rel="stylesheet" href="styles/settings-view.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="topbar" data-region="topbar">
+    <p class="topbar-brand">
+      <span class="brand-prompt">~/hod $</span>
+      <span class="topbar-title">console</span>
+      <span class="prompt-cursor" aria-hidden="true"></span>
+    </p>
+
+    <nav class="topbar-nav" aria-label="Primary">
+      <a class="topbar-link" href="#view-spaces" data-nav-target="runtime" aria-controls="view-spaces" aria-current="page">Runtime</a>
+      <a class="topbar-link" href="#view-settings" data-nav-target="settings" data-capability="settings" aria-controls="view-settings">Settings</a>
+    </nav>
+
+    <p class="connection" id="connection-status" role="status" aria-live="polite" data-connection-state="connecting">connecting</p>
+  </header>
+
+  <div class="app" id="app" data-view="runtime">
+    <main class="main" id="main" tabindex="-1" aria-label="HOD console">
+      <h1 class="sr-only">hod console</h1>
+      <section class="pane pane-spaces" id="view-spaces" aria-label="Spaces" data-pane="spaces">
+        <h2 class="pane-title">// SPACES</h2>
+        <div class="pane-body" data-pane-body="spaces">
+          <p class="empty-state">Loading spaces…</p>
+        </div>
+      </section>
+
+      <section class="pane pane-agents pane-orchestration" id="view-agents" aria-label="Live orchestration graph" data-pane="orchestration">
+        <h2 class="pane-title">// ORCHESTRATION_DAG</h2>
+        <div class="pane-body" data-pane-body="agents">
+          <p class="empty-state">Waiting for a live orchestration snapshot.</p>
+        </div>
+      </section>
+
+      <section class="pane pane-transcript" id="view-transcript" aria-label="Transcript" data-pane="transcript">
+        <h2 class="pane-title">// LIVE_SCROLLBACK</h2>
+        <div class="pane-body" data-pane-body="transcript">
+          <p class="empty-state">Select an agent to view its transcript.</p>
+        </div>
+      </section>
+
+      <section class="pane pane-settings" id="view-settings" aria-label="Settings" data-pane="settings" data-capability="settings" hidden>
+        <h2 class="pane-title">// SETTINGS</h2>
+        <div class="pane-body" data-pane-body="settings">
+          <p class="empty-state">Loading settings…</p>
+        </div>
+      </section>
+    </main>
+
+  </div>
+
+  <div class="scanline" aria-hidden="true"></div>
+
+  <footer class="statusbar" data-region="statusbar" role="status" aria-live="polite" hidden>
+    <span data-statusbar-message>hod UI console</span>
+    <span class="statusbar-status" data-statusbar-status>—</span>
+  </footer>
+
+  <dialog class="confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-title">
+    <h2 class="confirm-title" id="confirm-title">Confirm</h2>
+    <p class="confirm-message" id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-primary" type="button" data-confirm="ok">Confirm</button>
+      <button class="btn" type="button" data-confirm="cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <noscript class="noscript" id="noscript">
+    <p class="noscript-text">This console requires JavaScript.</p>
+  </noscript>
+
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>

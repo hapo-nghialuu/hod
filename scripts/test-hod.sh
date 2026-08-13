@@ -110,6 +110,129 @@ expect_output_success() {
   fi
 }
 
+check_hod_topology_contract() {
+  python3 - "$repo_dir/SKILL.md" "$repo_dir/references/operations.md" <<'PY'
+import re
+import sys
+
+skill_path, operations_path = sys.argv[1:]
+text = "\n".join(
+    open(path, encoding="utf-8").read() for path in (skill_path, operations_path)
+)
+
+allowed_tokens = {
+    "hod_role",
+    "hod_parent",
+    "hod_relation",
+    "hod_task",
+    "hod_run",
+}
+token_names = set(re.findall(r"\bhod_[a-z]+\b", text))
+if token_names != allowed_tokens:
+    raise SystemExit(f"unexpected topology token names: {sorted(token_names)}")
+
+if "herdr pane report-metadata" not in text or "--source hod" not in text:
+    raise SystemExit("report-metadata source contract is missing")
+ttl_values = re.findall(r"--ttl-ms\s+([0-9]+)", text)
+expected_ttl = 86400000
+if not ttl_values or any(int(value) != expected_ttl for value in ttl_values):
+    raise SystemExit(
+        f"metadata TTL must remain the finite 24-hour value {expected_ttl}: "
+        f"{ttl_values}"
+    )
+
+if "topology_metadata_supported=true" not in text:
+    raise SystemExit("supported metadata capability path is missing")
+if "topology_metadata_supported=false" not in text:
+    raise SystemExit("legacy metadata fallback path is missing")
+if ".result.pane.pane_id" not in text or "HERDR_PANE_ID" not in text:
+    raise SystemExit("metadata contract does not require real pane IDs")
+for args_name in ("metadata_args", "report_args"):
+    recipe = re.search(
+        rf"(?ms)^[ \t]*(?:local[ \t]+)?{args_name}=\(\n(?P<body>.*?)^[ \t]*\)",
+        text,
+    )
+    if not recipe:
+        raise SystemExit(f"{args_name} recipe is missing")
+    command_lines = [
+        line.strip() for line in recipe.group("body").splitlines() if line.strip()
+    ]
+    recipe_ttl_lines = [
+        line for line in command_lines if line.startswith("--ttl-ms")
+    ]
+    if recipe_ttl_lines != [f"--ttl-ms {expected_ttl}"]:
+        raise SystemExit(
+            f"{args_name} must contain exactly one finite 24-hour TTL: "
+            f"{recipe_ttl_lines}"
+        )
+    if command_lines[:2] != [
+        'herdr pane report-metadata "$pane_id"',
+        "--source hod",
+    ]:
+        raise SystemExit(
+            f"{args_name} must place pane_id immediately after report-metadata"
+        )
+    pattern = rf'if\s+!\s+"\$\{{{args_name}\[@\]\}}"\s*;\s*then'
+    if not re.search(pattern, text):
+        raise SystemExit(f"{args_name} report is not fail-soft under set -e")
+    if re.search(
+        rf'if\s+!\s+"\$\{{{args_name}\[@\]\}}"\s+"\$pane_id"',
+        text,
+    ):
+        raise SystemExit(f"{args_name} invocation appends pane_id twice")
+if "HOD topology metadata report failed; UI topology may be stale." not in text:
+    raise SystemExit("metadata failure warning is missing")
+if not re.search(r"report_hod_topology\(\).*?return 0", text, re.S):
+    raise SystemExit("metadata helper does not normalize report failure to success")
+
+lines = text.splitlines()
+for role, relation in (
+    ("worker", "delegate"),
+    ("advisor", "consult"),
+    ("reviewer", "verify"),
+    ("tester", "verify"),
+):
+    if not any(role in line and relation in line for line in lines):
+        raise SystemExit(f"missing {role}/{relation} mapping")
+if not re.search(r"impl.*implementer.*report.*worker", text, re.I | re.S):
+    raise SystemExit("implementation profiles are not pinned to worker topology")
+if not re.search(r"run_id.*controller.*every child", text, re.I | re.S):
+    raise SystemExit("shared controller/child run ID contract is missing")
+if not re.search(r"controller pane.*reused.*refresh.*before.*child", text, re.I | re.S):
+    raise SystemExit("reused-controller run refresh contract is missing")
+PY
+}
+
+check_hod_topology_privacy() {
+  python3 - "$repo_dir/SKILL.md" "$repo_dir/references/operations.md" <<'PY'
+import re
+import sys
+
+text = "\n".join(
+    open(path, encoding="utf-8").read() for path in sys.argv[1:]
+)
+task_values = re.findall(r'--token\s+"hod_task=([^"]+)"', text)
+if not task_values or any(value != "$task_label" for value in task_values):
+    raise SystemExit(f"hod_task is not bound only to the sanitized label: {task_values}")
+if "[a-z0-9._-]" not in text or not re.search(r"at most 48", text, re.I):
+    raise SystemExit("bounded task-label contract is missing")
+if re.search(
+    r'--token\s+"hod_task=[^"]*(?:prompt|transcript|secret|credential|'
+    r'api[_-]?key|bearer|token)',
+    text,
+    re.I,
+):
+    raise SystemExit("private or credential-like data appears in hod_task binding")
+if not re.search(r'--token\s+"hod_run=\$run_id"', text):
+    raise SystemExit("hod_run is not bound to the non-secret run identifier")
+PY
+}
+
+expect_success 'HOD topology metadata contract is documented' \
+  check_hod_topology_contract
+expect_success 'HOD topology metadata keeps task labels private and bounded' \
+  check_hod_topology_privacy
+
 # Test-only E0 snapshot primitive. It deliberately stays out of bin/hod: the
 # adaptive protocol is documentation, not a new public evidence CLI.
 capture_e0_pass() {
@@ -861,8 +984,242 @@ expect_success 'E0 snapshot becomes stale after a later content change' \
 # ---------------------------------------------------------------------------
 expect_success 'help exits 0' "$hod" help
 expect_success 'version exits 0' "$hod" version
-expect_output_contains 'version reports 0.1.14' 'hod 0.1.14' "$hod" version
+expect_output_contains 'version reports 0.1.15' 'hod 0.1.15' "$hod" version
 expect_success 'no-args prints usage' "$hod"
+
+# ---------------------------------------------------------------------------
+# ui launcher: isolated Node gate, argv forwarding, and entry safety
+# ---------------------------------------------------------------------------
+ui_fixture_root=$tmp_root/ui-launcher
+fake_node_dir=$ui_fixture_root/bin
+ui_home=$ui_fixture_root/home
+mkdir -p -- "$fake_node_dir" "$ui_home"
+
+fake_node=$fake_node_dir/node
+cat >"$fake_node" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == --version ]]; then
+  printf '%s\n' "${FAKE_NODE_VERSION:-v20.0.0}"
+  exit 0
+fi
+
+printf '%s\0' "$@" >"${FAKE_NODE_ARGV:?}"
+exit "${FAKE_NODE_EXIT:-0}"
+EOF
+chmod +x "$fake_node"
+
+# Keep the dummy entry in the already-created temporary skill checkout. Never
+# create a server entry in the real repository; the source checkout currently
+# has no ui/server.mjs, so fallback-only real launches remain unavailable.
+mkdir -p -- "$skill_dir/ui"
+printf '%s\n' '// disposable HOD UI launcher entry' >"$skill_dir/ui/server.mjs"
+
+ui_project="$tmp_root/projects/ui project with spaces"
+mkdir -p -- "$ui_project"
+
+run_fake_ui() {
+  local argv_file=$1
+  local node_version=$2
+  local node_exit=$3
+  shift 3
+
+  env \
+    HOME="$ui_home" \
+    HOD_HOME="$hod_home" \
+    HOD_BIN_DIR="$bin_dir" \
+    HOD_CLAUDE_DIR="$claude_dir" \
+    HOD_AGENTS_DIR="$agents_dir" \
+    HOD_REPO_URL="$src_repo" \
+    PATH="$fake_node_dir:$PATH" \
+    FAKE_NODE_ARGV="$argv_file" \
+    FAKE_NODE_VERSION="$node_version" \
+    FAKE_NODE_EXIT="$node_exit" \
+    "$hod" ui "$@"
+}
+
+run_fake_start() {
+  local argv_file=$1
+  local node_version=$2
+  local node_exit=$3
+  shift 3
+
+  env \
+    HOME="$ui_home" \
+    HOD_HOME="$hod_home" \
+    HOD_BIN_DIR="$bin_dir" \
+    HOD_CLAUDE_DIR="$claude_dir" \
+    HOD_AGENTS_DIR="$agents_dir" \
+    HOD_REPO_URL="$src_repo" \
+    PATH="$fake_node_dir:$PATH" \
+    FAKE_NODE_ARGV="$argv_file" \
+    FAKE_NODE_VERSION="$node_version" \
+    FAKE_NODE_EXIT="$node_exit" \
+    "$hod" start "$@"
+}
+
+run_fake_start_from() {
+  local cwd=$1
+  shift
+  (cd -- "$cwd" && run_fake_start "$@")
+}
+
+ui_argv_log=$tmp_root/ui-argv.log
+ui_argv_expected=$tmp_root/ui-argv.expected
+expect_success 'ui launches with a spaced project and port 0' \
+  run_fake_ui "$ui_argv_log" v20.0.0 0 \
+  --project "$ui_project" --port 0 --no-open
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --project "$ui_project" --port 0 --no-open >"$ui_argv_expected"
+expect_success 'ui preserves exact argv and spaced paths' \
+  cmp -s "$ui_argv_expected" "$ui_argv_log"
+
+ui_runtime_only_log=$tmp_root/ui-runtime-only.log
+rm -f -- "$ui_runtime_only_log"
+if run_fake_ui "$ui_runtime_only_log" v20.0.0 0 --runtime-only; then
+  ui_runtime_only_rc=0
+else
+  ui_runtime_only_rc=$?
+fi
+if [[ $ui_runtime_only_rc -eq 2 ]]; then
+  record 'public ui rejects the internal runtime-only selector with usage exit 2' true
+else
+  printf '  expected public ui exit 2, got %s\n' "$ui_runtime_only_rc" >&2
+  record 'public ui rejects the internal runtime-only selector with usage exit 2' false
+fi
+expect_success 'public ui runtime-only rejection does not launch Node' \
+  test ! -e "$ui_runtime_only_log"
+
+ui_max_log=$tmp_root/ui-max-argv.log
+ui_max_expected=$tmp_root/ui-max-argv.expected
+expect_success 'ui accepts port 65535' \
+  run_fake_ui "$ui_max_log" v20.0.0 0 --port 65535
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --port 65535 >"$ui_max_expected"
+expect_success 'ui preserves the maximum port argv' \
+  cmp -s "$ui_max_expected" "$ui_max_log"
+
+ui_unknown_log=$tmp_root/ui-unknown-argv.log
+ui_unknown_expected=$tmp_root/ui-unknown-argv.expected
+expect_success 'ui delegates an unknown option to server parsing' \
+  run_fake_ui "$ui_unknown_log" v20.0.0 0 --unknown-ui-option
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --unknown-ui-option >"$ui_unknown_expected"
+expect_success 'ui preserves the unknown option argv' \
+  cmp -s "$ui_unknown_expected" "$ui_unknown_log"
+
+ui_duplicate_log=$tmp_root/ui-duplicate-argv.log
+ui_duplicate_expected=$tmp_root/ui-duplicate-argv.expected
+expect_success 'ui delegates a duplicate option to server parsing' \
+  run_fake_ui "$ui_duplicate_log" v20.0.0 0 --port 1 --port 2
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --port 1 --port 2 >"$ui_duplicate_expected"
+expect_success 'ui preserves duplicate option argv' \
+  cmp -s "$ui_duplicate_expected" "$ui_duplicate_log"
+
+ui_missing_log=$tmp_root/ui-missing-value-argv.log
+ui_missing_expected=$tmp_root/ui-missing-value-argv.expected
+expect_success 'ui delegates a missing option value to server parsing' \
+  run_fake_ui "$ui_missing_log" v20.0.0 0 --project
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --project >"$ui_missing_expected"
+expect_success 'ui preserves missing-value argv' \
+  cmp -s "$ui_missing_expected" "$ui_missing_log"
+
+ui_exit_log=$tmp_root/ui-exit-argv.log
+if run_fake_ui "$ui_exit_log" v20.0.0 37; then
+  ui_exit_rc=0
+else
+  ui_exit_rc=$?
+fi
+if [[ $ui_exit_rc -eq 37 ]]; then
+  record 'ui preserves the server exit status' true
+else
+  printf '  expected ui exit 37, got %s\n' "$ui_exit_rc" >&2
+  record 'ui preserves the server exit status' false
+fi
+
+ui_old_node_log=$tmp_root/ui-old-node.log
+rm -f -- "$ui_old_node_log"
+expect_rejection 'ui rejects Node versions below 20' \
+  run_fake_ui "$ui_old_node_log" v19.9.0 0
+expect_success 'ui does not launch with an old Node' \
+  test ! -e "$ui_old_node_log"
+
+ui_outside_entry=$tmp_root/outside-ui-entry.fixture
+printf '%s\n' '// outside disposable entry' >"$ui_outside_entry"
+rm -f -- "$skill_dir/ui/server.mjs"
+ln -s -- "$ui_outside_entry" "$skill_dir/ui/server.mjs"
+ui_symlink_log=$tmp_root/ui-symlink.log
+expect_rejection 'ui refuses a symlinked installed entry' \
+  run_fake_ui "$ui_symlink_log" v20.0.0 0
+expect_success 'ui does not launch through a symlinked entry' \
+  test ! -e "$ui_symlink_log"
+rm -f -- "$skill_dir/ui/server.mjs"
+
+# Exercise missing-entry rejection from a temporary copy so the assertion is
+# independent of whether a concurrent checkout later adds the real fallback.
+missing_repo=$tmp_root/missing-ui-repo
+missing_hod=$missing_repo/bin/hod
+missing_home=$tmp_root/missing-ui-home
+mkdir -p -- "$missing_repo/bin" "$missing_home"
+cp -- "$hod" "$missing_hod"
+chmod +x "$missing_hod"
+run_missing_ui() {
+  local argv_file=$1
+  shift
+
+  env \
+    HOME="$ui_home" \
+    HOD_HOME="$missing_home" \
+    HOD_BIN_DIR="$tmp_root/missing-ui-bin" \
+    HOD_CLAUDE_DIR="$tmp_root/missing-ui-claude" \
+    HOD_AGENTS_DIR="$tmp_root/missing-ui-agents" \
+    PATH="$fake_node_dir:$PATH" \
+    FAKE_NODE_ARGV="$argv_file" \
+    FAKE_NODE_VERSION=v20.0.0 \
+    FAKE_NODE_EXIT=0 \
+    "$missing_hod" ui "$@"
+}
+
+ui_missing_entry_log=$tmp_root/ui-missing-entry.log
+expect_rejection 'ui rejects a missing installed and fallback entry' \
+  run_missing_ui "$ui_missing_entry_log"
+expect_success 'ui does not launch when the entry is missing' \
+  test ! -e "$ui_missing_entry_log"
+
+# Restore the disposable installed entry for the start argv checks below.
+printf '%s\n' '// disposable HOD UI launcher entry' >"$skill_dir/ui/server.mjs"
+
+start_cwd_a=$tmp_root/start-cwd-a
+start_cwd_b=$tmp_root/start-cwd-b
+mkdir -p -- "$start_cwd_a" "$start_cwd_b"
+start_log_a=$tmp_root/start-a.log
+start_log_b=$tmp_root/start-b.log
+start_expected_a=$tmp_root/start-a.expected
+start_expected_b=$tmp_root/start-b.expected
+
+expect_success 'start launches from an unrelated first cwd' \
+  run_fake_start_from "$start_cwd_a" "$start_log_a" v20.0.0 0 --port 0 --no-open
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --port 0 --no-open --runtime-only >"$start_expected_a"
+expect_success 'start forwards runtime-only argv from the first cwd' \
+  cmp -s "$start_expected_a" "$start_log_a"
+
+expect_success 'start launches from a second unrelated cwd' \
+  run_fake_start_from "$start_cwd_b" "$start_log_b" v20.0.0 0 --no-open --port 65535
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --no-open --port 65535 --runtime-only >"$start_expected_b"
+expect_success 'start forwards runtime-only argv from the second cwd' \
+  cmp -s "$start_expected_b" "$start_log_b"
+
+start_project_log=$tmp_root/start-project.log
+expect_rejection 'start rejects --project before Node or project validation' \
+  run_fake_start_from "$start_cwd_a" "$start_project_log" v20.0.0 0 \
+  --project "$tmp_root/project-does-not-exist"
+expect_success 'start --project does not invoke the Node entry' \
+  test ! -e "$start_project_log"
 
 # ---------------------------------------------------------------------------
 # summary

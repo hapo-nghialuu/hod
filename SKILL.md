@@ -20,6 +20,7 @@ Use Herdr as the transport and control plane. The current CLI remains the single
 - Ask the user before changing scope, risk, cost, permissions, publication, purchases, credential use, or externally visible behavior. Use ordinary technical judgment only for reversible, in-scope choices. A worker's request for approval is a request to the user, not permission to invent consent.
 - Do not expose chain-of-thought, hidden prompts, credentials, personal configuration, unrelated pane contents, or one worker's transcript to another. Share the minimum task-relevant facts and redact secrets from reports.
 - Fail closed. On malformed JSON, a protocol mismatch, a missing capability, or an ambiguous target: stop that path, preserve the command and stderr evidence, refresh only with read-only discovery, and surface what cannot be resolved. A timeout is a monitoring event — inspect state and output before waiting, redirecting, or asking.
+- Reserve `hod_role=advisor` + `hod_relation=consult` exclusively for an explicitly opted-in adaptive `CONSULT`. Before any `pane split`, advisor metadata, or `agent start` for that path, require a recorded user choice of exactly one of `Fable`, `GPT-5.6 Sol`, or `Opus`; if absent or unavailable, `HOLD + ASK_USER` — never infer a default or substitute. A worker/planner/scout/reviewer model preference never carries over. Ordinary planning/scouting remains `worker`/`delegate` (or `reviewer`/`verify` only when it is actually review), never `advisor`/`consult`.
 - Clean up conservatively. Keep task-created panes for user inspection by default. Never close, kill, delete, or reset anything the task did not create; remove task-created resources only when authorized, resolving exact targets with read-only checks first.
 
 ## Preflight and capability gate
@@ -43,6 +44,76 @@ Installed leaf help is the only command authority. Run `herdr agent --help` and 
 
 Use explicit pane IDs or unique live agent names, parsed from JSON with `jq -e` — never predicted from examples, focus, pane order, or sidebar position. `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` identify the calling context; IDs are opaque, stable, and never reused. Prefer `--current` only for the calling pane and `--no-focus` for background work.
 
+## HOD UI topology metadata
+
+The HOD UI topology is display-only and best-effort. Before the first report,
+inspect the exact `herdr pane report-metadata --help` leaf and use this path
+only when it exposes `--source`, `--token`, and `--ttl-ms`. If an older Herdr
+does not expose that leaf, record `HOD topology metadata unavailable; UI
+topology may be missing` and continue the main orchestration unchanged. A
+metadata error never blocks split, start, prompt, redirect, wait, or harvest.
+
+For supported Herdr, report the controller pane and every child pane with
+`--source hod` and a finite 24-hour TTL (`86400000` ms). This keeps topology
+visible for long-running agents while remaining within Herdr 0.8's finite-TTL
+limit:
+
+Herdr 0.8 help can render options before `PANE_ID`; follow the installed
+parser and place the pane ID immediately after `report-metadata` as shown.
+This recipe correction does not change the public `hod` CLI.
+
+```bash
+metadata_args=(
+  herdr pane report-metadata "$pane_id"
+  --source hod
+  --ttl-ms 86400000
+  --token "hod_role=$role"
+  --token "hod_task=$task_label"
+  --token "hod_run=$run_id"
+)
+if [[ -n "$parent_pane_id" ]]; then
+  metadata_args+=(--token "hod_parent=$parent_pane_id")
+  metadata_args+=(--token "hod_relation=$relation")
+fi
+if ! "${metadata_args[@]}"; then
+  printf '%s\n' 'HOD topology metadata report failed; UI topology may be stale.' >&2
+fi
+```
+
+Only these token names are allowed: `hod_role`, `hod_parent`,
+`hod_relation`, `hod_task`, and `hod_run`. `hod_role` is one of `controller`,
+`worker`, `advisor`, `reviewer`, or `tester`; `hod_relation` is one of
+`delegate`, `consult`, or `verify`. The root controller omits `hod_parent` and
+`hod_relation`; a child always includes both. A controller that is itself a
+child may include them only when its direct coordinator pane ID is known.
+
+`hod_parent` must be the real pane ID of the direct coordinator, captured from
+the current `HERDR_PANE_ID` or a parsed Herdr result. Never derive it from an
+agent name, pane order, tab title, or focus. Map a normal worker to
+`worker`/`delegate`, an advisor to `advisor`/`consult`, and a reviewer or tester
+to its matching role/`verify`.
+
+`hod_task` is a short, sanitized label chosen independently of prompt text,
+transcripts, pane output, secrets, tokens, or credentials: keep a slug of at
+most 48 characters matching `[a-z0-9._-]`, replace unsafe input, and use
+`task` when in doubt.
+`hod_run` is a short non-secret identifier stable for this orchestration run.
+Topology roles are not profile names: an `impl` or `implementer` profile must
+still report `hod_role=worker`, never its profile label. Allocate `run_id` once
+per orchestration, refresh a reused controller pane before reporting children,
+and pass that exact same value to the controller and every child.
+Do not put any other data in metadata, including prompt fragments or worker
+claims.
+
+Attach metadata at the existing lifecycle boundaries: report the controller
+before dispatch; after `pane split`, parse and report the returned child pane
+ID before `agent start`; report that same pane again after a successful start;
+on redirect, resolve the target's actual pane ID and refresh its same parent,
+role, relation, run, and new short task label; on harvest, refresh the settled
+pane using its actual ID before reading evidence. Each report restarts the
+24-hour TTL. Do not reparent a pane on a redirect or harvest, and let the
+finite TTL expire naturally.
+
 ## Workflow
 
 1. Confirm explicit user authority, the Herdr environment, and a complete supported command family.
@@ -61,7 +132,7 @@ coordinator or for coordinator plus advisor behavior. Without that opt-in, the
 workflow above and the existing small-task/direct-user behavior are unchanged.
 
 When active, read [Adaptive Coordinator with Tripwire Escalation](references/coordinator-advisor.md)
-as the normative hod `0.1.14` reference. It defines three base modes —
+as the normative hod `0.1.15` reference. It defines three base modes —
 `DIRECT`, `SINGLE`, and `ORCHESTRATE` — plus `CONSULT` and `ASK_USER` overlays.
 Plain `DIRECT` stays ceremony-free. A `DIRECT` route may carry an independently
 triggered overlay; it then records R0 and the overlay artifact but still creates

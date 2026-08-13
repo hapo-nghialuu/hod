@@ -54,7 +54,7 @@ hod status
 <summary>Ghim một bản phát hành thay vì bám <code>main</code> — khuyến nghị cho team</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.14 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.15 sh
 ```
 
 </details>
@@ -106,7 +106,7 @@ mong muốn, vai trò, và bằng chứng bạn muốn nhận lại.
 > trả lời trong pane của controller) · 🟢 rảnh.
 > Muốn thoát ra thì `ctrl+b` rồi `q`; không có gì chết cả.
 
-**Muốn chi tiết hơn?** [Quickstart — 4 cấp độ](docs/quickstart.md) ·
+**Muốn chi tiết hơn?** [Quickstart — 5 cấp độ](docs/quickstart.md) ·
 [Getting started — 6 bước có checkpoint](docs/getting-started.md) ·
 [Troubleshooting](docs/troubleshooting.md)
 
@@ -217,11 +217,55 @@ Xem [reference adaptive coordinator](references/coordinator-advisor.md) để đ
 | `hod update` | Fast-forward skill; checkout đang pin sẽ nhảy tới tag mới nhất. Từ chối khi cây có sửa đổi |
 | `hod settings list` | Liệt kê profile Claude, cờ Codex tương đương + lệnh khởi động dán được ngay |
 | `hod settings install [--role <r>] [--force]` | Ghi profile theo vai vào `.claude/` của dự án |
+| `hod ui [--project <path>] [--port <0-65535>] [--no-open]` | Mở console web HOD cục bộ (Node.js 20+) |
 | `hod uninstall [--purge]` | Chỉ xóa adapter trỏ về `~/.hod/skill` và cắt khối nhắc; không bao giờ đụng file lạ |
 
-Mọi lệnh `hod` gọi tới Herdr đều **chỉ đọc** (`herdr status`,
-`herdr integration status`). Nó không bao giờ khởi động agent, không cài
-integration, không thay đổi phiên — quyền đó thuộc về bạn và controller.
+Các kiểm tra Herdr của `hod` ngoài UI đều **chỉ đọc** (`herdr status`,
+`herdr integration status`). `hod` không bao giờ tự khởi động agent hay cài
+integration. UI cục bộ chỉ đọc runtime và chỉ đổi các setting đã công bố sau
+khi bạn xác nhận rõ ràng — quyền với session vẫn thuộc về bạn và controller.
+
+## Console UI cục bộ của HOD
+
+Đây là console web tuỳ chọn để xem workspace và agent Herdr mà không phải tự
+quản lý pane:
+
+```bash
+hod ui [--project <path>] [--port <0-65535>] [--no-open]
+```
+
+Muốn xem observer runtime-only, không phụ thuộc thư mục hiện tại, dùng:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` bị từ chối; observer bỏ qua thư mục hiện tại.
+Settings chọn project/space Herdr đang chạy bằng workspace ID bất định danh;
+server tự resolve checkout hiện tại theo nguồn authoritative và không bao giờ
+đưa đường dẫn project ra browser. `hod ui` và `hod ui --project` vẫn giữ nguyên
+hành vi project-scoped hiện có.
+
+UI hỗ trợ macOS và Linux, cần Node.js 20 trở lên. Port mặc định là `0` để hệ
+điều hành tự chọn port trống; macOS dùng `open`, Linux dùng `xdg-open`. Với
+`--no-open`, hoặc khi lệnh mở trình duyệt thất bại, `hod ui` in recovery URL.
+Fragment `#token` dùng một lần là dữ liệu nhạy cảm: không chia sẻ hay ghi log;
+browser đổi nó thành cookie cục bộ `HttpOnly; SameSite=Strict` rồi xóa fragment.
+
+Console chỉ local (`127.0.0.1`, kiểm tra chặt `Host`/`Origin`, không có remote/LAN).
+Runtime theo dõi nhiều workspace/space và agent bằng polling có giới hạn, không
+phải subscription Herdr event-driven; Herdr lỗi là nonfatal và reconnect xóa
+state stale. Dashboard tính tổng toàn bộ space cho spaces, agents, working,
+blocked, idle và done, không phụ thuộc space đang chọn. Transcript chỉ là tail
+16 MiB UTF-8 trong RAM của pane đang chọn, chỉ đọc, không persistent,
+byte-exact, append-only hay audit log. Với `hod start`, Settings có thể cài ba
+profile role HOD đã công bố cho project live đang chọn và cập nhật đúng mười key
+Herdr global có kiểu sau khi xác nhận. Project root thiếu hoặc mơ hồ sẽ fail
+closed; key lạ/bí mật không lộ ra. Runtime-only vẫn không có hành động điều
+khiển agent.
+
+Ma trận setting, confirmation/force, giới hạn ghi và residual boundary khi cùng
+user swap path được mô tả đầy đủ ở [Console UI HOD cục bộ](docs/usage-guide.md#local-hod-ui-console).
 
 ## Khối nhắc
 
@@ -360,8 +404,9 @@ skill kích hoạt — cộng các reference chỉ nạp khi cần:
 
 | Tài liệu | Dành cho |
 | --- | --- |
-| [Quickstart — 4 cấp độ](docs/quickstart.md) | Bắt đầu trong 2 phút; chỉ leo cấp khi thấy chật |
+| [Quickstart — 5 cấp độ](docs/quickstart.md) | Bắt đầu trong 2 phút; chỉ leo cấp khi thấy chật |
 | [Getting started](docs/getting-started.md) | Chi tiết đầy đủ |
+| [Console UI HOD cục bộ](docs/usage-guide.md#local-hod-ui-console) | Runtime dashboard, giới hạn transcript, settings và ranh giới bảo mật |
 | [Usage guide](docs/usage-guide.md) | Công thức prompt: pipeline, đội song song, điều hướng, chọn model |
 | [Portfolio orchestration](docs/portfolio-orchestration.md) | Quản nhiều dự án với một orchestrator |
 | [Troubleshooting](docs/troubleshooting.md) | Adapter, preflight, lệch capability |
@@ -375,7 +420,7 @@ herdr-orchestrator/
 ├── bin/hod                     # CLI — install, doctor, settings, update
 ├── install.sh                  # bootstrap curl | sh (HOD_REF để ghim version)
 ├── scripts/
-│   ├── test-hod.sh             # 55 test hermetic cho CLI
+│   ├── test-hod.sh             # 142 test hermetic cho CLI
 │   └── validate.sh             # syntax + frontmatter + link markdown
 ├── templates/                  # policy mẫu + profile quyền theo vai
 ├── docs/                       # tài liệu cho người

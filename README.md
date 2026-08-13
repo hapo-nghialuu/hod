@@ -54,7 +54,7 @@ hod status
 <summary>Pin a release instead of tracking <code>main</code> — recommended for teams</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.14 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.15 sh
 ```
 
 </details>
@@ -116,7 +116,7 @@ the outcome, the roles, and what evidence you expect back.
 > that pane, but answer in the controller's pane) · 🟢 idle.
 > Detach any time with `ctrl+b` then `q`; nothing dies.
 
-**Need more detail?** [Quickstart — four levels](docs/quickstart.md) ·
+**Need more detail?** [Quickstart — five levels](docs/quickstart.md) ·
 [Getting started — six checked steps](docs/getting-started.md) ·
 [Troubleshooting](docs/troubleshooting.md)
 
@@ -228,12 +228,58 @@ the complete protocol and [usage examples](docs/usage-guide.md).
 | `hod update` | Fast-forward the skill; a pinned checkout moves to the newest tag. Refuses a dirty tree |
 | `hod settings list` | Show Claude role profiles and equivalent Codex flags; Grok uses its native flags — no templates printed |
 | `hod settings install [--role <r>] [--force]` | Write role profiles into a project's `.claude/` |
+| `hod ui [--project <path>] [--port <0-65535>] [--no-open]` | Launch the local HOD web console (Node.js 20+) |
 | `hod uninstall [--purge]` | Remove only adapters that resolve into `~/.hod/skill`, and strip the reminder block; never touches foreign files |
 
-Everything `hod` runs against Herdr is **read-only** (`herdr status`,
-`herdr integration status`). It never starts agents, never installs
-integrations, never mutates a session — that authority stays with you and the
-controller.
+The non-UI `hod` checks against Herdr are **read-only** (`herdr status`,
+`herdr integration status`). `hod` never starts agents or installs
+integrations. The local UI reads the runtime and can change only the documented
+settings after your explicit confirmation — session authority stays with you
+and the controller.
+
+## The local HOD UI console
+
+The UI is an optional local web console for watching Herdr workspaces and
+agents without managing panes by hand:
+
+```bash
+hod ui [--project <path>] [--port <0-65535>] [--no-open]
+```
+
+For the directory-independent, runtime-only observer, use:
+
+```bash
+hod start [--port <0-65535>] [--no-open]
+```
+
+`hod start --project <path>` is rejected; the observer ignores the current
+directory. Its Settings view selects a live Herdr project/space by opaque
+workspace ID; the server resolves the current authoritative checkout and never
+exposes project paths to the browser. `hod ui` and `hod ui --project` keep their
+existing project-scoped behavior unchanged.
+
+It supports macOS and Linux and requires Node.js 20 or newer. The default port
+is `0` (an OS-selected free port), and the default browser opener is `open` on
+macOS or `xdg-open` on Linux. `--no-open`, or a failed opener, prints a recovery
+URL. Treat its one-time `#token` fragment as sensitive: never share or log it;
+the browser exchanges it for a local `HttpOnly; SameSite=Strict` cookie and
+clears the fragment.
+
+The console is local-only (`127.0.0.1` with strict `Host`/`Origin` checks and no
+remote/LAN mode). Its Runtime view tracks multiple Herdr workspaces/spaces and
+agents using bounded polling, not event-driven Herdr subscriptions; Herdr
+outages are nonfatal and reconnect clears stale state. The dashboard reports
+all-space totals for spaces, agents, working, blocked, idle, and done, regardless
+of the selected space. Transcript output is only the selected pane's RAM-only,
+capped 16 MiB UTF-8 tail, read-only and not persistent, byte-exact, append-only,
+or an audit log. In `hod start`, Settings can install the documented three HOD
+role profiles for the selected live project and update exactly ten typed,
+allowlisted global Herdr keys after confirmation. Missing or ambiguous project
+roots fail closed; unknown and secret keys stay hidden. Runtime-only mode still
+exposes no agent-control actions.
+
+The complete console behavior, settings matrix, write checks, and residual
+same-user path-swap limitation are documented in [Local HOD UI console](docs/usage-guide.md#local-hod-ui-console).
 
 ## The reminder block
 
@@ -377,8 +423,9 @@ the skill activates — plus references loaded only when needed:
 
 | Guide | For |
 | --- | --- |
-| [Quickstart — four levels](docs/quickstart.md) | Start in 2 minutes; climb only when a level feels limiting |
+| [Quickstart — five levels](docs/quickstart.md) | Start in 2 minutes; climb only when a level feels limiting |
 | [Getting started](docs/getting-started.md) | Full setup detail |
+| [Local HOD UI console](docs/usage-guide.md#local-hod-ui-console) | Local runtime dashboard, transcript limits, settings, and security boundary |
 | [Usage guide](docs/usage-guide.md) | Prompt recipes: pipelines, parallel teams, steering, model selection |
 | [Portfolio orchestration](docs/portfolio-orchestration.md) | Managing several projects with one orchestrator |
 | [Troubleshooting](docs/troubleshooting.md) | Adapters, preflight, capability mismatches |
@@ -392,7 +439,7 @@ herdr-orchestrator/
 ├── bin/hod                     # the CLI — install, doctor, settings, update
 ├── install.sh                  # curl | sh bootstrap (HOD_REF pins a version)
 ├── scripts/
-│   ├── test-hod.sh             # 125 hermetic CLI tests
+│   ├── test-hod.sh             # 142 hermetic CLI tests
 │   └── validate.sh             # syntax + frontmatter + markdown links
 ├── templates/                  # policy template + role permission profiles
 ├── docs/                       # human guides

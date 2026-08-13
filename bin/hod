@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-HOD_VERSION=0.1.14
+HOD_VERSION=0.1.15
 HOD_REPO_URL="${HOD_REPO_URL:-https://github.com/hapo-nghialuu/hod.git}"
 
 usage() {
@@ -15,6 +15,8 @@ Usage:
   hod uninstall [--project <path>] [--purge] [--no-memo]
   hod settings list
   hod settings install [--project <path>] [--role <name>] [--force]
+  hod ui [--project <path>] [--port <0-65535>] [--no-open]
+  hod start [--port <0-65535>] [--no-open]
   hod version
   hod help
 
@@ -29,6 +31,8 @@ Subcommands:
   uninstall   Remove hod-managed adapter symlinks; --purge also removes skill data
   settings    Copy per-role Claude Code settings profiles into a project
               (list shows the roles; install writes .claude/settings.<role>.json)
+  ui          Launch the local HOD web console (Node.js 20+)
+  start       Launch the foreground, loopback-only runtime observer (Node.js 20+)
   version     Print the hod version
   help        Show this help
 
@@ -880,6 +884,112 @@ cmd_update() {
   printf 'updated skill: %s → %s\n' "$old" "$new"
 }
 
+resolve_ui_entry() {
+  local installed_ui_dir=$SKILL_DIR/ui
+  local installed_entry=$installed_ui_dir/server.mjs
+  local repo_root repo_ui_dir repo_entry
+
+  # A UI directory or entry symlink could redirect execution outside the
+  # installed skill. Treat an unsafe installed candidate as an error rather
+  # than silently falling back to a different checkout.
+  if [[ -L "$installed_ui_dir" || -L "$installed_entry" ]]; then
+    fail "unsafe UI entry path: $installed_entry"
+  fi
+  if [[ -e "$installed_ui_dir" && ! -d "$installed_ui_dir" ]]; then
+    fail "UI entry directory is not a directory: $installed_ui_dir"
+  fi
+  if [[ -e "$installed_entry" ]]; then
+    [[ -f "$installed_entry" ]] || fail "UI entry is not a regular file: $installed_entry"
+    printf '%s\n' "$installed_entry"
+    return 0
+  fi
+
+  repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P) ||
+    fail "cannot resolve repository-relative UI entry"
+  repo_ui_dir=$repo_root/ui
+  repo_entry=$repo_ui_dir/server.mjs
+
+  if [[ -L "$repo_ui_dir" || -L "$repo_entry" ]]; then
+    fail "unsafe UI entry path: $repo_entry"
+  fi
+  [[ -f "$repo_entry" ]] ||
+    fail "UI entry missing: expected $installed_entry or $repo_entry"
+  printf '%s\n' "$repo_entry"
+}
+
+ui_entry_is_safe() {
+  local entry=$1 parent
+  parent=$(dirname -- "$entry")
+  [[ ! -L "$parent" && -d "$parent" && -O "$parent" ]] || return 1
+  [[ ! -L "$entry" && -f "$entry" && -O "$entry" ]] || return 1
+}
+
+resolve_node_20() {
+  local node_bin node_version node_major
+
+  node_bin=$(command -v node 2>/dev/null) ||
+    fail "Node.js 20 or newer is required for hod ui"
+  [[ -n "$node_bin" ]] || fail "Node.js 20 or newer is required for hod ui"
+
+  # Capture and validate the version without evaluating any command output.
+  node_version=$("$node_bin" --version 2>/dev/null) ||
+    fail "Node.js 20 or newer is required for hod ui"
+  if [[ ! "$node_version" =~ ^v([0-9]+)(\.[0-9]+){0,2}$ ]]; then
+    fail "Node.js 20 or newer is required for hod ui"
+  fi
+  node_major=${BASH_REMATCH[1]}
+  (( node_major >= 20 )) || fail "Node.js 20 or newer is required for hod ui"
+
+  printf '%s\n' "$node_bin"
+}
+
+launch_ui() {
+  local runtime_only=$1
+  shift
+  local ui_entry node_bin hod_bin
+  local -a ui_argv
+
+  ui_entry=$(resolve_ui_entry)
+  node_bin=$(resolve_node_20)
+  hod_bin=$0
+
+  # Recheck ownership, regular-file type, and the immediate parent just before
+  # exec. Pure shell cannot keep a directory fd while preserving Node's
+  # relative-import resolution: a same-user process can still swap this path
+  # after the check. That residual boundary is intentionally not fail-closed.
+  ui_entry_is_safe "$ui_entry" || fail "unsafe UI entry path: $ui_entry"
+
+  # The server owns UI option parsing. Keep argv as an array so spaces and
+  # leading dashes remain data, never shell syntax; exec preserves status and
+  # signal delivery after validation succeeds.
+  ui_argv=(--hod-bin "$hod_bin" "$@")
+  if [[ "$runtime_only" == true ]]; then
+    ui_argv+=(--runtime-only)
+  fi
+  exec "$node_bin" "$ui_entry" "${ui_argv[@]}"
+}
+
+cmd_ui() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == '--runtime-only' ]] || continue
+    usage_error "ui does not accept --runtime-only"
+  done
+  launch_ui false "$@"
+}
+
+cmd_start() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == '--project' ]] || continue
+    usage_error "start does not accept --project"
+  done
+
+  # Keep the existing UI launcher, Node gate, entry safety, and signal path;
+  # the private launcher boundary appends the internal runtime-only selector.
+  launch_ui true "$@"
+}
+
 remove_if_managed_adapter() {
   local link=$1
   local skill_abs
@@ -1210,6 +1320,12 @@ main() {
       ;;
     settings)
       cmd_settings "$@"
+      ;;
+    ui)
+      cmd_ui "$@"
+      ;;
+    start)
+      cmd_start "$@"
       ;;
     version)
       cmd_version "$@"

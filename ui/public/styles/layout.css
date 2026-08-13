@@ -1,0 +1,150 @@
+/* layout.css — topbar, three-pane shell, responsive stack, statusbar */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg);
+  border-bottom: var(--border-width) solid var(--line);
+}
+
+.topbar-brand,
+.topbar-nav,
+.connection {
+  display: inline-flex;
+  align-items: center;
+}
+
+.topbar-brand {
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.topbar-title {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.topbar-subtitle,
+.connection,
+.statusbar {
+  color: var(--fg-muted);
+}
+
+.topbar-nav {
+  gap: var(--space-1);
+  margin-inline: auto;
+}
+
+.topbar-link {
+  min-height: var(--target);
+  padding: var(--space-2) var(--space-3);
+}
+
+.connection {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--line);
+  font-size: var(--fs-xxs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(13rem, 14rem) minmax(30rem, 1fr) minmax(22rem, 26.4rem);
+  background: var(--bg);
+}
+
+.statusbar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-statusbar);
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 32px;
+  padding: var(--space-1) var(--space-4);
+  background: var(--bg-raised);
+  border-top: var(--border-width) solid var(--line);
+  font-size: var(--fs-xs);
+}
+
+.statusbar-status {
+  margin-inline-start: auto;
+}
+.statusbar[hidden] { display: none; }
+
+@media (max-width: 1280px) {
+  .main {
+    grid-template-columns: 12rem minmax(26rem, 1fr) minmax(19.8rem, 22rem);
+  }
+}
+
+@media (max-width: 1040px) {
+  .topbar {
+    padding-inline: var(--space-3);
+  }
+
+  .topbar-nav {
+    order: 3;
+    width: 100%;
+    margin-inline: 0;
+  }
+
+  .topbar-link {
+    flex: 1 1 8rem;
+    justify-content: center;
+  }
+
+  .app {
+    overflow: auto;
+  }
+
+  .main {
+    grid-template-columns: 12rem minmax(0, 1fr);
+    grid-template-rows: minmax(22rem, 1fr) minmax(18rem, 42vh);
+  }
+
+  .pane-spaces { grid-column: 1; grid-row: 1; }
+  .pane-orchestration { grid-column: 2; grid-row: 1; }
+  .pane-transcript {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    border-top: var(--border-width) solid var(--line);
+  }
+}
+
+@media (max-width: 760px) {
+  .app { flex: 0 0 auto; overflow: visible; }
+  .main { display: flex; flex-direction: column; overflow-x: hidden; }
+  .pane-transcript { border-top: 0; }
+}
+
+@media (max-width: 420px) {
+  .topbar-brand {
+    flex: 1 1 auto;
+  }
+
+  .connection {
+    order: 2;
+  }
+}

@@ -29,6 +29,21 @@ Actions workflow (`.github/workflows/validate.yml`) remains available for manual
 runs on Ubuntu and macOS; automatic push and pull-request runs are temporarily
 paused, so contributors must run both commands locally before proposing a change.
 
+For HOD UI changes, run the zero-dependency Node checks as well:
+
+```bash
+npm --prefix ui test
+npm --prefix ui run check
+./scripts/test-hod.sh
+./scripts/validate.sh
+```
+
+The UI tests include real loopback HTTP/SSE coverage and real Unix-socket Herdr
+transport cases. `npm --prefix ui run check` syntax-checks the server and
+frontend modules; `npm --prefix ui test` exercises the runtime, transcript,
+settings, security, and frontend contracts. Keep UI tests honest: do not
+replace loopback or Unix-socket cases with mocks merely to make a check pass.
+
 For a release, also validate with the official Codex `skill-creator` validator
 when it is installed. The validator requires PyYAML; create an isolated
 environment instead of modifying the system Python:

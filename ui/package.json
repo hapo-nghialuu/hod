@@ -1,0 +1,14 @@
+{
+  "name": "hod-ui-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local web console for HOD/Herdr — zero-dependency Node 20 runtime.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node -e \"const fs=require('fs');const cp=require('child_process');const path=require('path');let bad=false;function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())walk(file);else if(file.endsWith('.mjs')){const r=cp.spawnSync(process.execPath,['--check',file],{stdio:'inherit'});if(r.status!==0)bad=true;}}}for(const dir of ['server','public'])if(fs.existsSync(dir))walk(dir);process.exit(bad?1:0);\""
+  }
+}
