@@ -1,6 +1,6 @@
 # Adaptive Coordinator with Tripwire Escalation
 
-This is the normative reference for hod `0.1.14` adaptive mode. It is
+This is the normative reference for hod `0.1.15` adaptive mode. It is
 opt-in: activate it only when the user asks for an adaptive coordinator or for
 coordinator plus advisor behavior. Without that request, follow the existing
 `SKILL.md` workflow unchanged.
@@ -9,7 +9,7 @@ The protocol has three base modes — `DIRECT`, `SINGLE`, and `ORCHESTRATE` —
 with `CONSULT` and `ASK_USER` as overlays. It governs routing, evidence,
 tripwires, advisor review, handoff, and permission handling. It does not add a
 runtime service or a new CLI surface. This release does not add public ledger
-or evidence commands; those remain deferred beyond `0.1.14`.
+or evidence commands; those remain deferred beyond `0.1.15`.
 
 ## Invariants
 
@@ -296,7 +296,7 @@ E0 rules:
    restarts checks, E0, and G2 on the new state.
 10. A revision or evidence change after the final E0 makes the receipt stale and
    requires a new receipt before acceptance or integration.
-11. `0.1.14` uses bounded Git, Herdr, and test commands; it adds no evidence
+11. `0.1.15` uses bounded Git, Herdr, and test commands; it adds no evidence
    validator command.
 
 ### Conditional advisor gates

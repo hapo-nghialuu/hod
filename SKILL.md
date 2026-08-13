@@ -132,7 +132,7 @@ coordinator or for coordinator plus advisor behavior. Without that opt-in, the
 workflow above and the existing small-task/direct-user behavior are unchanged.
 
 When active, read [Adaptive Coordinator with Tripwire Escalation](references/coordinator-advisor.md)
-as the normative hod `0.1.14` reference. It defines three base modes —
+as the normative hod `0.1.15` reference. It defines three base modes —
 `DIRECT`, `SINGLE`, and `ORCHESTRATE` — plus `CONSULT` and `ASK_USER` overlays.
 Plain `DIRECT` stays ceremony-free. A `DIRECT` route may carry an independently
 triggered overlay; it then records R0 and the overlay artifact but still creates

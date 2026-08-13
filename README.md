@@ -54,7 +54,7 @@ hod status
 <summary>Pin a release instead of tracking <code>main</code> — recommended for teams</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.14 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.15 sh
 ```
 
 </details>
