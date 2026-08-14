@@ -2819,7 +2819,7 @@ expect_success 'E0 snapshot becomes stale after a later content change' \
 # ---------------------------------------------------------------------------
 expect_success 'help exits 0' "$hod" help
 expect_success 'version exits 0' "$hod" version
-expect_output_contains 'version reports 0.1.16' 'hod 0.1.16' "$hod" version
+expect_output_contains 'version reports 0.1.17' 'hod 0.1.17' "$hod" version
 expect_success 'no-args prints usage' "$hod"
 
 # ---------------------------------------------------------------------------
