@@ -54,7 +54,7 @@ hod status
 <summary>Ghim một bản phát hành thay vì bám <code>main</code> — khuyến nghị cho team</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.15 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.16 sh
 ```
 
 </details>

@@ -667,7 +667,7 @@ for pattern in (r"\bHold\b", r"\bpublishing\b", r"\bask me\b", r"not.*advisor.*a
             f"Adaptive usage guide: ASK_USER example missing semantic {pattern}"
         )
 
-expected_version = "0.1.15"
+expected_version = "0.1.16"
 version_surfaces = {
     "bin/hod": (
         (root / "bin/hod").read_text(encoding="utf-8"),
