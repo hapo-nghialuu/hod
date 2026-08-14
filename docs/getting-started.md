@@ -81,7 +81,7 @@ state does not appear in the sidebar.
 curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | sh
 
 # Or pin a release — recommended for teams, reproducible:
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.15 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.16 sh
 ```
 
 This clones the skill into `~/.hod/skill/`, puts the `hod` executable on
@@ -134,8 +134,10 @@ One writer, one read-only reviewer. Do not commit or push.
 Return changed files, real test results, and unresolved questions.
 ```
 
-The controller runs its preflight, splits panes, starts workers, verifies their
-output, and reports back.
+The controller runs its preflight and uses guarded `hod dispatch`: it binds and
+reads back the controller, splits, binds and reads back the child, starts it,
+refreshes and reads it back, then submits the direct-user prompt. It verifies
+the output and reports back.
 
 Two equivalent ways to reach the skill:
 
@@ -152,6 +154,69 @@ the evidence you expect back.
 see "background agents" messages while the sidebar stays still, the CLI is
 using its own internal sub-agents rather than Herdr orchestration — restate the
 request with both names.
+
+### Guarded topology dispatch
+
+HOD child creation is public through `hod dispatch start`; the prompt must be a
+non-empty direct-user message on stdin:
+
+```bash
+project_cwd="$(pwd -P)"
+printf '%s\n' 'Implement the health endpoint and return changed files and test results.' |
+  hod dispatch start --name health-worker --role worker \
+    --task health-endpoint --run run-demo-001 --kind claude \
+    --cwd "$project_cwd" --direction right --timeout 120000 -- \
+    --settings .claude/settings.impl.json
+```
+
+The required shape is
+`--name <unique> --role worker|advisor|reviewer|tester --task <safe-slug>
+--run <safe-id> --kind <kind> --cwd <absolute> --direction right|down
+--timeout <ms> -- [native args...]`. A successful start prints a JSON receipt
+with `pane_id`, `name`, `role`, `relation`, `task`, and `run`; relations map
+`worker=delegate`, `advisor=consult`, and `reviewer=tester=verify`.
+For advisor, add explicit matching `--advisor-choice fable|gpt-5.6-sol|opus`
+and `--advisor-model` flags plus exactly one matching native `-m` or
+`--model`; `fable`/`opus` require `--kind claude`, while `gpt-5.6-sol` requires
+`--kind codex`; the receipt records `requested_model` and explicitly sets
+`runtime_model_verified=false` because Herdr does not expose the runtime model.
+Without a user choice, hold and ask. Herdr 0.8
+identity/readiness/status/sequence readbacks are authoritative, including an
+unchanged launch terminal. A session may appear only after the initial prompt;
+start validates the first delivery by terminal and sequence, waits for the
+actual Codex UI prompt surface, and sends by unique agent name. A sessionless
+receipt is accepted only in `working` or `blocked`, while redirects
+require a later non-empty, unchanged session. NUL-containing stdin is rejected
+without truncation, prompts above 131072 bytes fail before mutation, and the
+requested timeout is one wall-clock deadline through guarded delivery. Failure
+cleanup has a separate hard three-second cap. Start
+bootstraps only an untagged controller; existing controller run, child, partial,
+or invalid HOD tokens are checked before mutation. Prompt rejects advisor,
+working, or not-ready children before metadata reporting.
+
+Redirect an existing child only through the guarded prompt command:
+
+```bash
+printf '%s\n' 'Continue the task and report fresh verification.' |
+  hod dispatch prompt --pane "$child_pane_id" --task health-follow-up \
+    --kind claude --run run-demo-001 --timeout 120000
+```
+
+It refreshes and validates before redirecting. Dispatches for the same
+coordinator are serialized; redirect requires the expected agent kind and
+unchanged authoritative terminal, agent-session identity, and sequence. Raw `herdr pane split`, `herdr
+agent start`, and `herdr agent prompt` are unsupported in the HOD workflow
+because they can recreate `UNMAPPED`; an old Herdr missing the exact capability
+fails before split. After updating HOD, restart or reload long-lived controller
+sessions so they load the new instructions; HOD cannot retrofit a running
+session's loaded instructions. On a verified failure before any agent-start
+attempt, HOD closes only the freshly split child after exact cleanup readback.
+A change visible at that read makes HOD leave it open and fail closed. Herdr
+0.8 has no owner-CAS for the following close or metadata write, so an outside
+mutation in that final interval remains a race; never mix raw lifecycle
+operations with an active HOD dispatch. Pre-delivery failures restore staged
+metadata when possible; ambiguous lifecycle attempts are never auto-retried.
+HOD never intentionally closes an unproven or already-started pane.
 
 ## Optional: local HOD UI console
 
@@ -215,9 +280,16 @@ Detach any time with `ctrl+b` then `q`; everything keeps running. Reattach with
 
 1. Answer blocked workers **through the controller**, never by typing into the
    worker's pane — one chain of command.
-2. Never combine `--dangerously-skip-permissions` with a `--settings` role
-   profile: that flag disables every deny rule and the profile stops enforcing
-   anything.
+2. Never combine a native permission bypass flag or mode with a `--settings`
+   role profile. Forms such as `--dangerously-skip-permissions` and
+   `--permission-mode bypassPermissions` disable deny rules; `hod dispatch
+   start` rejects direct forms and values in native argv before mutation. It
+   does not inspect referenced settings, profile, or config files, custom
+   sandbox profiles, or ambient CLI configuration; pass only inputs you trust.
+   Advisor, reviewer, and tester starts additionally use a positive native-arg
+   allowlist: no root subcommands or native cwd/system-prompt changes. Use
+   file-based Claude settings, Codex `-s read-only -c
+   features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules.
 3. When something breaks, run `hod doctor` first and read
    [Troubleshooting](troubleshooting.md) — do not restart the Herdr server.
 
@@ -235,9 +307,9 @@ printf '%s\n' "$status_json" | jq -e \
 ```
 
 Never export those variables outside Herdr — they are environment evidence, not
-a feature toggle. Installed leaf help (`herdr agent start --help`,
-`herdr agent prompt --help`, …) is the authority on command syntax; never mix
-forms from different Herdr versions.
+a feature toggle. Installed leaf help (`hod dispatch start --help`,
+`hod dispatch prompt --help`, and the underlying `herdr ... --help`) is the
+authority on command syntax; never mix forms from different Herdr versions.
 
 ## Choosing models and roles
 
@@ -245,8 +317,11 @@ Model selection is a native CLI argument passed after Herdr's `--` separator,
 and it is separate from role enforcement:
 
 ```bash
-herdr agent start impl --kind claude --pane "$p" \
-  -- --settings .claude/settings.impl.json --model <model-id>
+printf '%s\n' 'Implement the requested task and return verification.' |
+  hod dispatch start --name model-worker --role worker --task model-task \
+    --run run-demo-001 --kind claude --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- \
+    --settings .claude/settings.impl.json --model <model-id>
 ```
 
 Project defaults live in each CLI's own configuration — for Claude Code, a

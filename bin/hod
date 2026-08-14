@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-HOD_VERSION=0.1.15
+HOD_VERSION=0.1.16
 HOD_REPO_URL="${HOD_REPO_URL:-https://github.com/hapo-nghialuu/hod.git}"
 
 usage() {
@@ -15,6 +15,11 @@ Usage:
   hod uninstall [--project <path>] [--purge] [--no-memo]
   hod settings list
   hod settings install [--project <path>] [--role <name>] [--force]
+  hod dispatch start --name <unique-agent-name> --role <role> --task <slug> --run <id> --kind <kind> \
+    --cwd <path> --direction <right|down> --timeout <ms> \
+    [--advisor-choice <fable|gpt-5.6-sol|opus> --advisor-model <same>] -- [native args...]
+  hod dispatch prompt --pane <child-pane-id> --kind <kind> --task <slug> --run <id> \
+    --timeout <ms>
   hod ui [--project <path>] [--port <0-65535>] [--no-open]
   hod start [--port <0-65535>] [--no-open]
   hod version
@@ -31,6 +36,7 @@ Subcommands:
   uninstall   Remove hod-managed adapter symlinks; --purge also removes skill data
   settings    Copy per-role Claude Code settings profiles into a project
               (list shows the roles; install writes .claude/settings.<role>.json)
+  dispatch    Fail-closed Herdr 0.8 topology-aware child start and redirect
   ui          Launch the local HOD web console (Node.js 20+)
   start       Launch the foreground, loopback-only runtime observer (Node.js 20+)
   version     Print the hod version
@@ -1188,8 +1194,8 @@ cmd_settings_list() {
   printf '    -- -s workspace-write --ask-for-approval never \\\n'
   printf '    -c sandbox_workspace_write.network_access=true \\\n'
   printf '    -c '\''sandbox_workspace_write.writable_roots=["<abs-repo>/.git"]'\''\n'
-  printf '\nNever combine a profile with --dangerously-skip-permissions: that flag\n'
-  printf 'overrides every deny rule and the profile stops enforcing anything.\n'
+  printf '\nNever combine a profile with a native permission bypass flag or mode.\n'
+  printf 'They override deny rules, so hod dispatch rejects them before mutation.\n'
 }
 
 # Resolve the project the settings profiles are written into: an explicit
@@ -1329,6 +1335,1711 @@ cmd_settings() {
   esac
 }
 
+DISPATCH_HERDR_BIN=''
+DISPATCH_START_HELP=''
+DISPATCH_PROMPT_HELP=''
+DISPATCH_AGENT_GET_HELP=''
+DISPATCH_AGENT_READ_HELP=''
+DISPATCH_PANE_GET_HELP=''
+DISPATCH_REPORT_HELP=''
+DISPATCH_SPLIT_HELP=''
+DISPATCH_CLOSE_HELP=''
+DISPATCH_PROMPT=''
+DISPATCH_PANE_JSON=''
+DISPATCH_PANE_WORKSPACE=''
+DISPATCH_PANE_CWD=''
+DISPATCH_PANE_STATUS=''
+DISPATCH_PANE_AGENT=''
+DISPATCH_PANE_SESSION=''
+DISPATCH_PANE_TERMINAL=''
+DISPATCH_PANE_REVISION=''
+DISPATCH_CONTROLLER_PANE=''
+DISPATCH_AGENT_JSON=''
+DISPATCH_AGENT_NAME=''
+DISPATCH_AGENT_PANE=''
+DISPATCH_AGENT_KIND=''
+DISPATCH_AGENT_WORKSPACE=''
+DISPATCH_AGENT_READY=''
+DISPATCH_AGENT_STATUS=''
+DISPATCH_AGENT_SEQ=0
+DISPATCH_AGENT_REVISION=0
+DISPATCH_AGENT_SESSION=''
+DISPATCH_AGENT_TERMINAL=''
+DISPATCH_LOCK_DIR=''
+DISPATCH_LOCK_OWNER=''
+DISPATCH_NEW_CHILD=''
+DISPATCH_NEW_CHILD_WORKSPACE=''
+DISPATCH_NEW_CHILD_CWD=''
+DISPATCH_NEW_CHILD_TERMINAL=''
+DISPATCH_AGENT_START_ATTEMPTED=false
+DISPATCH_PROMPT_ATTEMPTED=false
+DISPATCH_RUNTIME_FILE=''
+DISPATCH_TIMEOUT_MARKER=''
+DISPATCH_DEADLINE_PID=''
+DISPATCH_DEADLINE_SLEEPER_FILE=''
+DISPATCH_DEADLINE_READY_FILE=''
+DISPATCH_ACTIVE_PID=''
+DISPATCH_CLEANUP_DEADLINE_PID=''
+DISPATCH_CLEANUP_SLEEPER_FILE=''
+DISPATCH_CLEANUP_READY_FILE=''
+DISPATCH_CLEANUP_MARKER=''
+DISPATCH_CLEANUP_ACTIVE_PID=''
+DISPATCH_CLEANUP_EXPIRED=false
+DISPATCH_CONTROLLER_ROLLBACK_PANE=''
+DISPATCH_CONTROLLER_ROLLBACK_TOKENS=''
+DISPATCH_CONTROLLER_ROLLBACK_WORKSPACE=''
+DISPATCH_CONTROLLER_ROLLBACK_TERMINAL=''
+DISPATCH_CONTROLLER_ROLLBACK_AGENT=''
+DISPATCH_CONTROLLER_ROLLBACK_SESSION=''
+DISPATCH_CONTROLLER_ROLLBACK_REVISION=0
+DISPATCH_CHILD_ROLLBACK_PANE=''
+DISPATCH_CHILD_ROLLBACK_TOKENS=''
+DISPATCH_CHILD_ROLLBACK_WORKSPACE=''
+DISPATCH_CHILD_ROLLBACK_TERMINAL=''
+DISPATCH_CHILD_ROLLBACK_AGENT=''
+DISPATCH_CHILD_ROLLBACK_SESSION=''
+DISPATCH_CHILD_ROLLBACK_REVISION=0
+DISPATCH_METADATA_ROLLBACK=false
+
+dispatch_validate_herdr_id() {
+  local label=$1 value=$2
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:%+-]{0,255}$ ]] || \
+    usage_error "$label must be a bounded safe Herdr ID"
+}
+
+dispatch_validate_task() {
+  local value=$1
+  [[ "$value" =~ ^[a-z0-9][a-z0-9._-]{0,47}$ ]] || \
+    usage_error "task must match [a-z0-9][a-z0-9._-]{0,47}"
+}
+
+dispatch_validate_run() {
+  local value=$1
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || \
+    usage_error "run must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+}
+
+dispatch_validate_kind() {
+  local value=$1
+  [[ "$value" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || \
+    usage_error "kind must be a bounded agent kind"
+}
+
+dispatch_validate_cwd() {
+  local value=$1
+  [[ "$value" == /* && -d "$value" ]] || \
+    usage_error "cwd must be an existing absolute directory"
+  DISPATCH_CWD=$(cd -- "$value" && pwd -P) || \
+    usage_error "cwd could not be resolved: $value"
+}
+
+dispatch_validate_direction() {
+  case $1 in
+    right|down) ;;
+    *) usage_error "direction must be right or down" ;;
+  esac
+}
+
+dispatch_validate_timeout() {
+  local value=$1
+  [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]] && (( value <= 300000 )) || \
+    usage_error "timeout must be an integer from 1 to 300000"
+}
+
+dispatch_read_direct_prompt() {
+  local LC_ALL=C
+  DISPATCH_PROMPT=''
+  if IFS= read -r -d "" DISPATCH_PROMPT; then
+    fail "dispatch prompt stdin must not contain NUL bytes"
+  fi
+  [[ "$DISPATCH_PROMPT" =~ [^[:space:]] ]] || \
+    usage_error "dispatch prompt must be a non-empty direct-user prompt on stdin"
+  (( ${#DISPATCH_PROMPT} <= 131072 )) || \
+    usage_error "dispatch prompt must not exceed 131072 bytes"
+}
+
+dispatch_require_controller() {
+  [[ "${HERDR_ENV:-}" == 1 ]] || \
+    fail "dispatch requires HERDR_ENV=1 in a Herdr-managed pane"
+  [[ -n "${HERDR_PANE_ID:-}" ]] || \
+    fail "dispatch requires HERDR_PANE_ID"
+  dispatch_validate_herdr_id HERDR_PANE_ID "$HERDR_PANE_ID"
+  DISPATCH_CONTROLLER_PANE=$HERDR_PANE_ID
+  DISPATCH_HERDR_BIN=${HOD_HERDR_BIN:-herdr}
+  [[ -n "$DISPATCH_HERDR_BIN" ]] || fail "HOD_HERDR_BIN must not be empty"
+  command -v "$DISPATCH_HERDR_BIN" >/dev/null 2>&1 || \
+    fail "Herdr command is unavailable: $DISPATCH_HERDR_BIN"
+  command -v jq >/dev/null 2>&1 || fail "jq is required for guarded dispatch"
+}
+
+dispatch_lock_key() {
+  local checksum rest
+  read -r checksum rest < <(printf '%s' "$DISPATCH_CONTROLLER_PANE" | cksum)
+  [[ "$checksum" =~ ^[0-9]+$ ]] || fail "could not derive the dispatch lock key"
+  printf '%s\n' "$checksum"
+}
+
+dispatch_stop_deadline() {
+  if [[ -n "$DISPATCH_DEADLINE_PID" ]]; then
+    dispatch_terminate_pid_bounded "$DISPATCH_DEADLINE_PID"
+    DISPATCH_DEADLINE_PID=''
+  fi
+  [[ -n "$DISPATCH_DEADLINE_SLEEPER_FILE" ]] && \
+    rm -f -- "$DISPATCH_DEADLINE_SLEEPER_FILE"
+  [[ -n "$DISPATCH_DEADLINE_READY_FILE" ]] && \
+    rm -f -- "$DISPATCH_DEADLINE_READY_FILE"
+  DISPATCH_DEADLINE_SLEEPER_FILE=''
+  DISPATCH_DEADLINE_READY_FILE=''
+}
+
+dispatch_remove_runtime_files() {
+  [[ -n "$DISPATCH_RUNTIME_FILE" ]] && rm -f -- "$DISPATCH_RUNTIME_FILE"
+  [[ -n "$DISPATCH_TIMEOUT_MARKER" ]] && rm -f -- "$DISPATCH_TIMEOUT_MARKER"
+  [[ -n "$DISPATCH_DEADLINE_SLEEPER_FILE" ]] && \
+    rm -f -- "$DISPATCH_DEADLINE_SLEEPER_FILE"
+  [[ -n "$DISPATCH_DEADLINE_READY_FILE" ]] && \
+    rm -f -- "$DISPATCH_DEADLINE_READY_FILE"
+  [[ -n "$DISPATCH_CLEANUP_SLEEPER_FILE" ]] && \
+    rm -f -- "$DISPATCH_CLEANUP_SLEEPER_FILE"
+  [[ -n "$DISPATCH_CLEANUP_READY_FILE" ]] && \
+    rm -f -- "$DISPATCH_CLEANUP_READY_FILE"
+  [[ -n "$DISPATCH_CLEANUP_MARKER" ]] && rm -f -- "$DISPATCH_CLEANUP_MARKER"
+  DISPATCH_RUNTIME_FILE=''
+  DISPATCH_TIMEOUT_MARKER=''
+}
+
+dispatch_kill_active_process() {
+  if [[ -n "$DISPATCH_ACTIVE_PID" ]]; then
+    dispatch_terminate_pid_bounded "$DISPATCH_ACTIVE_PID"
+    DISPATCH_ACTIVE_PID=''
+  fi
+}
+
+dispatch_terminate_pid_bounded() {
+  local pid=$1 attempt
+  kill -TERM "$pid" 2>/dev/null || true
+  for attempt in 1 2 3 4 5; do
+    kill -0 "$pid" 2>/dev/null || break
+    command -p sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+dispatch_timer_exit() {
+  local timer_pid=${1:-} timer_done=${2:-false} attempt job_pid owned=false
+  trap - TERM
+  [[ "$timer_done" != true ]] || exit 0
+  if [[ -z "$timer_pid" ]]; then
+    set +u
+    timer_pid=$!
+    set -u
+  fi
+  if [[ "$timer_pid" =~ ^[1-9][0-9]*$ ]]; then
+    for job_pid in $(jobs -p); do
+      [[ "$job_pid" == "$timer_pid" ]] && owned=true
+    done
+  fi
+  if [[ "$owned" == true ]]; then
+    kill -TERM "$timer_pid" 2>/dev/null || true
+    for attempt in 1 2 3; do
+      kill -0 "$timer_pid" 2>/dev/null || break
+      command -p sleep 0.05
+    done
+    kill -KILL "$timer_pid" 2>/dev/null || true
+    wait "$timer_pid" 2>/dev/null || true
+  fi
+  exit 0
+}
+
+dispatch_prepare_runtime() {
+  local timeout=$1 tmp_root delay parent_pid=$$ attempt
+  tmp_root=${TMPDIR:-/tmp}
+  [[ -d "$tmp_root" ]] || fail "dispatch temporary directory is unavailable: $tmp_root"
+  DISPATCH_RUNTIME_FILE=$(mktemp "$tmp_root/hod-dispatch.XXXXXX") || \
+    fail "could not create the dispatch capture file"
+  DISPATCH_TIMEOUT_MARKER=$DISPATCH_RUNTIME_FILE.timeout
+  DISPATCH_DEADLINE_SLEEPER_FILE=$DISPATCH_RUNTIME_FILE.deadline-pid
+  DISPATCH_DEADLINE_READY_FILE=$DISPATCH_RUNTIME_FILE.deadline-ready
+  dispatch_install_cleanup_traps
+  printf -v delay '%d.%03d' "$((timeout / 1000))" "$((timeout % 1000))"
+  (
+    sleeper_pid=''
+    timer_done=false
+    trap - EXIT HUP INT USR1
+    trap 'dispatch_timer_exit "$sleeper_pid" "$timer_done"' TERM
+    command -p sleep "$delay" &
+    sleeper_pid=$!
+    printf '%s\n' "$sleeper_pid" >"$DISPATCH_DEADLINE_SLEEPER_FILE"
+    : >"$DISPATCH_DEADLINE_READY_FILE"
+    if wait "$sleeper_pid"; then :; else exit 0; fi
+    timer_done=true
+    sleeper_pid=''
+    rm -f -- "$DISPATCH_DEADLINE_SLEEPER_FILE"
+    : >"$DISPATCH_TIMEOUT_MARKER"
+    kill -TERM "$parent_pid" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
+  DISPATCH_DEADLINE_PID=$!
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [[ -f "$DISPATCH_DEADLINE_READY_FILE" ]] && return 0
+    kill -0 "$DISPATCH_DEADLINE_PID" 2>/dev/null || break
+    command -p sleep 0.01
+  done
+  fail "could not establish the dispatch wall-clock deadline"
+}
+
+dispatch_run_herdr() {
+  local output_name=$1 captured rc
+  shift
+  : >"$DISPATCH_RUNTIME_FILE" || fail "could not reset the dispatch capture file"
+  "$DISPATCH_HERDR_BIN" "$@" >"$DISPATCH_RUNTIME_FILE" 2>&1 &
+  DISPATCH_ACTIVE_PID=$!
+  if wait "$DISPATCH_ACTIVE_PID"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  DISPATCH_ACTIVE_PID=''
+  captured=$(<"$DISPATCH_RUNTIME_FILE")
+  printf -v "$output_name" '%s' "$captured"
+  return "$rc"
+}
+
+dispatch_run_cleanup_herdr() {
+  local output_name=$1 captured rc
+  shift
+  printf -v "$output_name" '%s' ''
+  [[ "$DISPATCH_CLEANUP_EXPIRED" == false ]] || return 124
+  : >"$DISPATCH_RUNTIME_FILE" || return 1
+  "$DISPATCH_HERDR_BIN" "$@" >"$DISPATCH_RUNTIME_FILE" 2>&1 &
+  DISPATCH_CLEANUP_ACTIVE_PID=$!
+  if [[ "$DISPATCH_CLEANUP_EXPIRED" != false ]]; then
+    dispatch_terminate_pid_bounded "$DISPATCH_CLEANUP_ACTIVE_PID"
+    DISPATCH_CLEANUP_ACTIVE_PID=''
+    return 124
+  fi
+  if wait "$DISPATCH_CLEANUP_ACTIVE_PID"; then rc=0; else rc=$?; fi
+  DISPATCH_CLEANUP_ACTIVE_PID=''
+  captured=$(<"$DISPATCH_RUNTIME_FILE")
+  printf -v "$output_name" '%s' "$captured"
+  [[ "$DISPATCH_CLEANUP_EXPIRED" == false ]] || return 124
+  return "$rc"
+}
+
+dispatch_cleanup_timeout_signal() {
+  DISPATCH_CLEANUP_EXPIRED=true
+  if [[ -n "$DISPATCH_CLEANUP_ACTIVE_PID" ]]; then
+    dispatch_terminate_pid_bounded "$DISPATCH_CLEANUP_ACTIVE_PID"
+    DISPATCH_CLEANUP_ACTIVE_PID=''
+  fi
+}
+
+dispatch_start_cleanup_deadline() {
+  local parent_pid=$$ delay=3.000 attempt
+  DISPATCH_CLEANUP_EXPIRED=false
+  DISPATCH_CLEANUP_MARKER=$DISPATCH_RUNTIME_FILE.cleanup-timeout
+  DISPATCH_CLEANUP_SLEEPER_FILE=$DISPATCH_RUNTIME_FILE.cleanup-deadline-pid
+  DISPATCH_CLEANUP_READY_FILE=$DISPATCH_RUNTIME_FILE.cleanup-deadline-ready
+  rm -f -- "$DISPATCH_CLEANUP_MARKER" "$DISPATCH_CLEANUP_SLEEPER_FILE" \
+    "$DISPATCH_CLEANUP_READY_FILE"
+  trap dispatch_cleanup_timeout_signal USR1
+  (
+    sleeper_pid=''
+    timer_done=false
+    trap - EXIT HUP INT USR1
+    trap 'dispatch_timer_exit "$sleeper_pid" "$timer_done"' TERM
+    command -p sleep "$delay" &
+    sleeper_pid=$!
+    printf '%s\n' "$sleeper_pid" >"$DISPATCH_CLEANUP_SLEEPER_FILE"
+    : >"$DISPATCH_CLEANUP_READY_FILE"
+    if wait "$sleeper_pid"; then :; else exit 0; fi
+    timer_done=true
+    sleeper_pid=''
+    rm -f -- "$DISPATCH_CLEANUP_SLEEPER_FILE"
+    : >"$DISPATCH_CLEANUP_MARKER"
+    kill -USR1 "$parent_pid" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
+  DISPATCH_CLEANUP_DEADLINE_PID=$!
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [[ -f "$DISPATCH_CLEANUP_READY_FILE" ]] && return 0
+    kill -0 "$DISPATCH_CLEANUP_DEADLINE_PID" 2>/dev/null || break
+    command -p sleep 0.01
+  done
+  dispatch_stop_cleanup_deadline
+  return 1
+}
+
+dispatch_stop_cleanup_deadline() {
+  if [[ -n "$DISPATCH_CLEANUP_DEADLINE_PID" ]]; then
+    dispatch_terminate_pid_bounded "$DISPATCH_CLEANUP_DEADLINE_PID"
+  fi
+  DISPATCH_CLEANUP_DEADLINE_PID=''
+  trap - USR1
+  [[ -n "$DISPATCH_CLEANUP_SLEEPER_FILE" ]] && \
+    rm -f -- "$DISPATCH_CLEANUP_SLEEPER_FILE"
+  [[ -n "$DISPATCH_CLEANUP_READY_FILE" ]] && \
+    rm -f -- "$DISPATCH_CLEANUP_READY_FILE"
+  [[ -n "$DISPATCH_CLEANUP_MARKER" ]] && rm -f -- "$DISPATCH_CLEANUP_MARKER"
+  DISPATCH_CLEANUP_SLEEPER_FILE=''
+  DISPATCH_CLEANUP_READY_FILE=''
+  DISPATCH_CLEANUP_MARKER=''
+}
+
+dispatch_release_lock() {
+  [[ -n "$DISPATCH_LOCK_DIR" && -n "$DISPATCH_LOCK_OWNER" ]] || return 0
+  if [[ -f "$DISPATCH_LOCK_DIR/owner" ]] &&
+    [[ "$(<"$DISPATCH_LOCK_DIR/owner")" == "$DISPATCH_LOCK_OWNER" ]]; then
+    rm -f -- "$DISPATCH_LOCK_DIR/owner"
+    rmdir -- "$DISPATCH_LOCK_DIR" 2>/dev/null || true
+  fi
+  DISPATCH_LOCK_DIR=''
+  DISPATCH_LOCK_OWNER=''
+}
+
+dispatch_validate_unstarted_child_for_cleanup() {
+  local pane_id=$1 output rc normalized actual_cwd
+  if dispatch_run_cleanup_herdr output pane get "$pane_id"; then
+    :
+  else
+    rc=$?
+    printf 'error: cleanup could not re-read freshly split pane %s (exit %s): %s\n' \
+      "$pane_id" "$rc" "$output" >&2
+    return 1
+  fi
+  if ! normalized=$(printf '%s\n' "$output" | jq -ce \
+    --arg expected_pane "$pane_id" \
+    --arg workspace "$DISPATCH_NEW_CHILD_WORKSPACE" \
+    --arg terminal "$DISPATCH_NEW_CHILD_TERMINAL" '
+      (.result.pane // .result // .pane // .) as $pane
+      | select(($pane | type) == "object")
+      | select($pane.pane_id == $expected_pane)
+      | select($pane.workspace_id == $workspace)
+      | select(($pane.cwd | type) == "string")
+      | select(($pane.terminal_id | type) == "string" and ($pane.terminal_id | length) > 0)
+      | select($terminal != "" and $pane.terminal_id == $terminal)
+      | select(($pane.agent // null) == null)
+      | select(($pane.agent_session // null) == null)
+      | select(($pane.revision | type) == "number" and
+          ($pane.revision | floor) == $pane.revision and $pane.revision >= 0)
+      | select($pane.agent_status == "idle" or
+          ($pane.agent_status == "unknown" and $pane.revision == 0))
+      | {cwd: $pane.cwd}
+    '); then
+    printf 'error: cleanup skipped pane %s because it is no longer the exact unstarted child\n' \
+      "$pane_id" >&2
+    return 1
+  fi
+  actual_cwd=$(printf '%s\n' "$normalized" | jq -er '.cwd')
+  [[ "$actual_cwd" == /* && -d "$actual_cwd" ]] || {
+    printf 'error: cleanup skipped pane %s because its cwd is not authoritative\n' \
+      "$pane_id" >&2
+    return 1
+  }
+  actual_cwd=$(cd -- "$actual_cwd" && pwd -P) || return 1
+  if [[ "$actual_cwd" != "$DISPATCH_NEW_CHILD_CWD" ]]; then
+    printf 'error: cleanup skipped pane %s because its cwd changed\n' "$pane_id" >&2
+    return 1
+  fi
+}
+
+dispatch_close_unstarted_child() {
+  local output rc
+  [[ -n "$DISPATCH_NEW_CHILD" && "$DISPATCH_AGENT_START_ATTEMPTED" == false ]] || return 0
+  dispatch_validate_unstarted_child_for_cleanup "$DISPATCH_NEW_CHILD" || return 1
+  if dispatch_run_cleanup_herdr output pane close "$DISPATCH_NEW_CHILD"; then
+    DISPATCH_NEW_CHILD=''
+    return 0
+  else
+    rc=$?
+  fi
+  printf 'error: cleanup failed for freshly split pane %s (exit %s): %s\n' \
+    "$DISPATCH_NEW_CHILD" "$rc" "$output" >&2
+  return 1
+}
+
+dispatch_stage_controller_rollback() {
+  DISPATCH_CONTROLLER_ROLLBACK_PANE=$1
+  DISPATCH_CONTROLLER_ROLLBACK_TOKENS=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -ce '.tokens')
+  DISPATCH_CONTROLLER_ROLLBACK_WORKSPACE=$DISPATCH_PANE_WORKSPACE
+  DISPATCH_CONTROLLER_ROLLBACK_TERMINAL=$DISPATCH_PANE_TERMINAL
+  DISPATCH_CONTROLLER_ROLLBACK_AGENT=$DISPATCH_PANE_AGENT
+  DISPATCH_CONTROLLER_ROLLBACK_SESSION=$DISPATCH_PANE_SESSION
+  DISPATCH_CONTROLLER_ROLLBACK_REVISION=$DISPATCH_PANE_REVISION
+}
+
+dispatch_stage_child_rollback() {
+  DISPATCH_CHILD_ROLLBACK_PANE=$1
+  DISPATCH_CHILD_ROLLBACK_TOKENS=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -ce '.tokens')
+  DISPATCH_CHILD_ROLLBACK_WORKSPACE=$DISPATCH_PANE_WORKSPACE
+  DISPATCH_CHILD_ROLLBACK_TERMINAL=$DISPATCH_PANE_TERMINAL
+  DISPATCH_CHILD_ROLLBACK_AGENT=$DISPATCH_PANE_AGENT
+  DISPATCH_CHILD_ROLLBACK_SESSION=$DISPATCH_PANE_SESSION
+  DISPATCH_CHILD_ROLLBACK_REVISION=$DISPATCH_PANE_REVISION
+}
+
+dispatch_restore_tokens() {
+  local pane_id=$1 tokens=$2 workspace=$3 terminal=$4 expected_agent=$5
+  local expected_session=$6 minimum_revision=$7 allow_active=$8
+  local output rc key value current_revision
+  local -a args=(pane report-metadata "$pane_id" --source hod --ttl-ms 86400000)
+  if ! dispatch_run_cleanup_herdr output pane get "$pane_id"; then
+    rc=$?
+    printf 'error: metadata rollback could not re-read pane %s (exit %s): %s\n' \
+      "$pane_id" "$rc" "$output" >&2
+    return 1
+  fi
+  if ! current_revision=$(printf '%s\n' "$output" | jq -er \
+    --arg expected_pane "$pane_id" --arg workspace "$workspace" \
+    --arg terminal "$terminal" --arg expected_agent "$expected_agent" \
+    --arg expected_session "$expected_session" \
+    --argjson minimum_revision "$minimum_revision" \
+    --argjson allow_active "$allow_active" '
+      (.result.pane // .result // .pane // .) as $pane
+      | select(($pane | type) == "object")
+      | select($pane.pane_id == $expected_pane)
+      | select($pane.workspace_id == $workspace)
+      | select($pane.terminal_id == $terminal)
+      | select(($pane.agent // "") == $expected_agent)
+      | select(($pane.agent_session.value // "") == $expected_session)
+      | select(($pane.revision | type) == "number" and
+          ($pane.revision | floor) == $pane.revision and
+          $pane.revision >= $minimum_revision and
+          $pane.revision <= 9007199254740991)
+      | select($allow_active or ($pane.agent_status | IN("idle","done","unknown")))
+      | $pane.revision
+    '); then
+    printf 'error: metadata rollback skipped pane %s because its owner identity changed\n' \
+      "$pane_id" >&2
+    return 1
+  fi
+  for key in hod_parent hod_relation hod_role hod_run hod_task; do
+    args+=(--clear-token "$key")
+  done
+  for key in hod_parent hod_relation hod_role hod_run hod_task; do
+    if value=$(printf '%s\n' "$tokens" | jq -er --arg key "$key" \
+      '.[$key] | strings | select(length > 0)' 2>/dev/null); then
+      args+=(--token "$key=$value")
+    fi
+  done
+  if dispatch_run_cleanup_herdr output "${args[@]}"; then
+    :
+  else
+    rc=$?
+    printf 'error: metadata rollback failed for pane %s (exit %s): %s\n' \
+      "$pane_id" "$rc" "$output" >&2
+    return 1
+  fi
+  if ! dispatch_run_cleanup_herdr output pane get "$pane_id"; then
+    rc=$?
+    printf 'error: metadata rollback readback failed for pane %s (exit %s): %s\n' \
+      "$pane_id" "$rc" "$output" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$output" | jq -e \
+    --arg expected_pane "$pane_id" --arg workspace "$workspace" \
+    --arg terminal "$terminal" --arg expected_agent "$expected_agent" \
+    --arg expected_session "$expected_session" \
+    --argjson minimum_revision "$current_revision" \
+    --argjson allow_active "$allow_active" \
+    --argjson expected_tokens "$tokens" '
+      (.result.pane // .result // .pane // .) as $pane
+      | ($pane.pane_id == $expected_pane)
+      and ($pane.workspace_id == $workspace)
+      and ($pane.terminal_id == $terminal)
+      and (($pane.agent // "") == $expected_agent)
+      and (($pane.agent_session.value // "") == $expected_session)
+      and (($pane.revision | type) == "number")
+      and (($pane.revision | floor) == $pane.revision)
+      and ($pane.revision >= $minimum_revision)
+      and ($pane.revision <= 9007199254740991)
+      and ($allow_active or ($pane.agent_status | IN("idle","done","unknown")))
+      and (($pane.tokens // {}) == $expected_tokens)
+    ' >/dev/null; then
+    printf 'error: metadata rollback readback was not exact for pane %s\n' \
+      "$pane_id" >&2
+    return 1
+  fi
+}
+
+dispatch_rollback_metadata() {
+  local close_ok=$1 had_new_child=$2 rollback_ok=true
+  [[ "$DISPATCH_METADATA_ROLLBACK" == true ]] || return 0
+  [[ "$DISPATCH_AGENT_START_ATTEMPTED" == false && \
+    "$DISPATCH_PROMPT_ATTEMPTED" == false ]] || return 0
+  if [[ "$had_new_child" == true && "$close_ok" != true ]]; then
+    printf 'error: child cleanup was ambiguous; restoring controller independently\n' >&2
+    rollback_ok=false
+  elif [[ "$had_new_child" != true && -n "$DISPATCH_CHILD_ROLLBACK_PANE" ]]; then
+    dispatch_restore_tokens "$DISPATCH_CHILD_ROLLBACK_PANE" \
+      "$DISPATCH_CHILD_ROLLBACK_TOKENS" "$DISPATCH_CHILD_ROLLBACK_WORKSPACE" \
+      "$DISPATCH_CHILD_ROLLBACK_TERMINAL" "$DISPATCH_CHILD_ROLLBACK_AGENT" \
+      "$DISPATCH_CHILD_ROLLBACK_SESSION" "$DISPATCH_CHILD_ROLLBACK_REVISION" \
+      false || rollback_ok=false
+  fi
+  if [[ -n "$DISPATCH_CONTROLLER_ROLLBACK_PANE" ]]; then
+    dispatch_restore_tokens "$DISPATCH_CONTROLLER_ROLLBACK_PANE" \
+      "$DISPATCH_CONTROLLER_ROLLBACK_TOKENS" \
+      "$DISPATCH_CONTROLLER_ROLLBACK_WORKSPACE" \
+      "$DISPATCH_CONTROLLER_ROLLBACK_TERMINAL" \
+      "$DISPATCH_CONTROLLER_ROLLBACK_AGENT" \
+      "$DISPATCH_CONTROLLER_ROLLBACK_SESSION" \
+      "$DISPATCH_CONTROLLER_ROLLBACK_REVISION" true || rollback_ok=false
+  fi
+  [[ "$rollback_ok" == true ]]
+}
+
+dispatch_exit_cleanup() {
+  local rc=$? timed_out=false close_ok=true had_new_child=false
+  trap - EXIT HUP INT TERM
+  [[ -n "$DISPATCH_TIMEOUT_MARKER" && -f "$DISPATCH_TIMEOUT_MARKER" ]] && timed_out=true
+  [[ -n "$DISPATCH_NEW_CHILD" && "$DISPATCH_AGENT_START_ATTEMPTED" == false ]] && \
+    had_new_child=true
+  dispatch_kill_active_process
+  dispatch_stop_deadline
+  if dispatch_start_cleanup_deadline; then
+    dispatch_close_unstarted_child || { rc=1; close_ok=false; }
+    dispatch_rollback_metadata "$close_ok" "$had_new_child" || rc=1
+    dispatch_stop_cleanup_deadline
+  else
+    printf 'error: dispatch cleanup deadline could not be established\n' >&2
+    rc=1
+  fi
+  dispatch_release_lock
+  dispatch_remove_runtime_files
+  if [[ "$timed_out" == true ]]; then
+    printf 'error: dispatch exceeded its wall-clock timeout\n' >&2
+    rc=124
+  fi
+  exit "$rc"
+}
+
+dispatch_install_cleanup_traps() {
+  trap dispatch_exit_cleanup EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
+
+dispatch_acquire_lock() {
+  local timeout=$1 key root attempt=1 max_attempts
+  key=$(dispatch_lock_key)
+  root=$HOD_HOME/dispatch-locks
+  mkdir -p -- "$root" || fail "cannot create dispatch lock directory: $root"
+  DISPATCH_LOCK_DIR=$root/$key.lock
+  DISPATCH_LOCK_OWNER="$$:${PPID:-0}:$DISPATCH_CONTROLLER_PANE"
+  max_attempts=$(( (timeout + 99) / 100 ))
+  (( max_attempts > 0 )) || max_attempts=1
+  while ! mkdir -- "$DISPATCH_LOCK_DIR" 2>/dev/null; do
+    if (( attempt >= max_attempts )); then
+      DISPATCH_LOCK_DIR=''
+      DISPATCH_LOCK_OWNER=''
+      fail "another dispatch for controller $DISPATCH_CONTROLLER_PANE is still active"
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if ! printf '%s\n' "$DISPATCH_LOCK_OWNER" >"$DISPATCH_LOCK_DIR/owner"; then
+    rmdir -- "$DISPATCH_LOCK_DIR" 2>/dev/null || true
+    DISPATCH_LOCK_DIR=''
+    DISPATCH_LOCK_OWNER=''
+    fail "could not record dispatch lock ownership"
+  fi
+}
+
+dispatch_finish() {
+  DISPATCH_NEW_CHILD=''
+  DISPATCH_NEW_CHILD_WORKSPACE=''
+  DISPATCH_NEW_CHILD_CWD=''
+  DISPATCH_NEW_CHILD_TERMINAL=''
+  DISPATCH_METADATA_ROLLBACK=false
+  DISPATCH_CONTROLLER_ROLLBACK_PANE=''
+  DISPATCH_CONTROLLER_ROLLBACK_TOKENS=''
+  DISPATCH_CONTROLLER_ROLLBACK_WORKSPACE=''
+  DISPATCH_CONTROLLER_ROLLBACK_TERMINAL=''
+  DISPATCH_CONTROLLER_ROLLBACK_AGENT=''
+  DISPATCH_CONTROLLER_ROLLBACK_SESSION=''
+  DISPATCH_CONTROLLER_ROLLBACK_REVISION=0
+  DISPATCH_CHILD_ROLLBACK_PANE=''
+  DISPATCH_CHILD_ROLLBACK_TOKENS=''
+  DISPATCH_CHILD_ROLLBACK_WORKSPACE=''
+  DISPATCH_CHILD_ROLLBACK_TERMINAL=''
+  DISPATCH_CHILD_ROLLBACK_AGENT=''
+  DISPATCH_CHILD_ROLLBACK_SESSION=''
+  DISPATCH_CHILD_ROLLBACK_REVISION=0
+  dispatch_stop_deadline
+  dispatch_release_lock
+  dispatch_remove_runtime_files
+  trap - EXIT HUP INT TERM
+}
+
+dispatch_capture_help() {
+  local output_name=$1 label=$2 output rc
+  shift 2
+  if dispatch_run_herdr output "$@" --help; then
+    printf -v "$output_name" '%s' "$output"
+    return 0
+  else
+    rc=$?
+  fi
+  fail "Herdr 0.8 capability probe failed for $label (exit $rc): $output"
+}
+
+dispatch_help_lists_value() {
+  local help=$1 value=$2
+  printf '%s\n' "$help" | grep -Eq \
+    "possible values:.*( |,)${value}(,|\\]|$)"
+}
+
+dispatch_probe_capabilities() {
+  dispatch_capture_help DISPATCH_START_HELP 'agent start' agent start
+  dispatch_capture_help DISPATCH_PROMPT_HELP 'agent prompt' agent prompt
+  dispatch_capture_help DISPATCH_AGENT_GET_HELP 'agent get' agent get
+  dispatch_capture_help DISPATCH_AGENT_READ_HELP 'agent read' agent read
+  dispatch_capture_help DISPATCH_PANE_GET_HELP 'pane get' pane get
+  dispatch_capture_help DISPATCH_REPORT_HELP 'pane report-metadata' pane report-metadata
+  dispatch_capture_help DISPATCH_SPLIT_HELP 'pane split' pane split
+  dispatch_capture_help DISPATCH_CLOSE_HELP 'pane close' pane close
+
+  grep -q -- '--kind' <<<"$DISPATCH_START_HELP" &&
+    grep -q -- '--pane' <<<"$DISPATCH_START_HELP" || \
+    fail "Herdr agent start capability is not the supported 0.8 leaf"
+  grep -q -- '--wait' <<<"$DISPATCH_PROMPT_HELP" &&
+    grep -q -- '--until' <<<"$DISPATCH_PROMPT_HELP" &&
+    grep -q -- '--timeout' <<<"$DISPATCH_PROMPT_HELP" || \
+    fail "Herdr agent prompt capability is not the supported 0.8 leaf"
+  grep -qF -- 'Usage: herdr agent get' <<<"$DISPATCH_AGENT_GET_HELP" || \
+    fail "Herdr agent get capability is missing"
+  grep -qF -- 'Usage: herdr agent read' <<<"$DISPATCH_AGENT_READ_HELP" &&
+    grep -q -- '--source' <<<"$DISPATCH_AGENT_READ_HELP" &&
+    grep -q -- '--format' <<<"$DISPATCH_AGENT_READ_HELP" || \
+    fail "Herdr agent read capability is missing readiness options"
+  local status
+  for status in working blocked done idle unknown; do
+    dispatch_help_lists_value "$DISPATCH_PROMPT_HELP" "$status" || \
+      fail "Herdr agent prompt does not advertise --until $status"
+  done
+  grep -qF -- 'Usage: herdr pane get' <<<"$DISPATCH_PANE_GET_HELP" || \
+    fail "Herdr pane get capability is missing"
+  grep -q -- '--source' <<<"$DISPATCH_REPORT_HELP" &&
+    grep -q -- '--token' <<<"$DISPATCH_REPORT_HELP" &&
+    grep -q -- '--clear-token' <<<"$DISPATCH_REPORT_HELP" &&
+    grep -q -- '--ttl-ms' <<<"$DISPATCH_REPORT_HELP" || \
+    fail "Herdr report-metadata capability is missing required options"
+  grep -q -- '--direction' <<<"$DISPATCH_SPLIT_HELP" &&
+    grep -q -- '--cwd' <<<"$DISPATCH_SPLIT_HELP" &&
+    grep -q -- '--no-focus' <<<"$DISPATCH_SPLIT_HELP" || \
+    fail "Herdr pane split capability is not the supported 0.8 leaf"
+  grep -qF -- 'Usage: herdr pane close' <<<"$DISPATCH_CLOSE_HELP" || \
+    fail "Herdr pane close capability is missing"
+}
+
+dispatch_pane_get() {
+  local pane_id=$1 output rc normalized returned
+  if dispatch_run_herdr output pane get "$pane_id"; then
+    :
+  else
+    rc=$?
+    fail "pane get failed for $pane_id (exit $rc): $output"
+  fi
+
+  if ! normalized=$(printf '%s\n' "$output" | jq -ce '
+    (.result.pane // .result // .pane // .) as $pane
+    | select(($pane | type) == "object")
+    | select(($pane.pane_id | type) == "string")
+    | select(($pane.workspace_id | type) == "string")
+    | select(($pane.agent_status | type) == "string")
+    | select($pane.tokens == null or ($pane.tokens | type) == "object")
+    | select($pane.cwd == null or ($pane.cwd | type) == "string")
+    | select($pane.agent == null or
+        (($pane.agent | type) == "string" and ($pane.agent | length) > 0))
+    | select($pane.agent_session == null or
+        (($pane.agent_session | type) == "object"
+          and ($pane.agent_session.value | type) == "string"
+          and ($pane.agent_session.value | length) > 0))
+    | select(($pane.terminal_id | type) == "string" and
+        ($pane.terminal_id | length) > 0)
+    | select(($pane.revision | type) == "number")
+    | select(($pane.revision | floor) == $pane.revision)
+    | select($pane.revision >= 0 and $pane.revision <= 9007199254740991)
+    | select($pane.agent_status | IN("idle","working","blocked","done","unknown"))
+      | {
+        pane_id: $pane.pane_id,
+        workspace_id: $pane.workspace_id,
+        cwd: ($pane.cwd // null),
+        agent_status: $pane.agent_status,
+        agent: ($pane.agent // null),
+        agent_session: ($pane.agent_session.value // null),
+        terminal_id: ($pane.terminal_id // null),
+        revision: $pane.revision,
+        tokens: ($pane.tokens // {})
+      }
+  '); then
+    fail "pane get returned malformed JSON for $pane_id: $output"
+  fi
+  DISPATCH_PANE_JSON=$normalized
+  returned=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -er '.pane_id')
+  [[ "$returned" == "$pane_id" ]] || \
+    fail "pane get returned a different pane: expected $pane_id, got $returned"
+  DISPATCH_PANE_WORKSPACE=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -er '.workspace_id')
+  dispatch_validate_herdr_id 'pane workspace ID' "$DISPATCH_PANE_WORKSPACE"
+  DISPATCH_PANE_CWD=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -r '.cwd // ""')
+  DISPATCH_PANE_STATUS=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -er '.agent_status')
+  DISPATCH_PANE_AGENT=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -r '.agent // ""')
+  DISPATCH_PANE_SESSION=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -r '.agent_session // ""')
+  DISPATCH_PANE_TERMINAL=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -r '.terminal_id // ""')
+  DISPATCH_PANE_REVISION=$(printf '%s\n' "$DISPATCH_PANE_JSON" | jq -r '.revision')
+}
+
+dispatch_parse_agent_result() {
+  local output=$1 expected_type=$2 expected_name=$3 expected_pane=$4
+  local expected_kind=$5 expected_workspace=$6 require_ready=$7
+  local require_seq_advance=${8:-false} minimum_seq=${9:-0}
+  local expected_session=${10:-} expected_terminal=${11:-}
+  local require_session=${12:-false} normalized
+
+  if ! normalized=$(printf '%s\n' "$output" | jq -s -ce \
+    --arg type "$expected_type" \
+    --arg name "$expected_name" \
+    --arg pane "$expected_pane" \
+    --arg kind "$expected_kind" \
+    --arg workspace "$expected_workspace" \
+    --arg expected_session "$expected_session" \
+    --arg expected_terminal "$expected_terminal" \
+    --argjson require_ready "$require_ready" \
+    --argjson require_seq_advance "$require_seq_advance" \
+    --argjson require_session "$require_session" \
+    --argjson minimum_seq "$minimum_seq" '
+      if length != 1 then error("expected one JSON response") else .[0] end
+      | select(type == "object")
+      | select((.result | type) == "object")
+      | .result as $result
+      | select($result.type == $type)
+      | select(($result.agent | type) == "object")
+      | $result.agent as $agent
+      | select(($agent.name | type) == "string")
+      | select(($agent.pane_id | type) == "string")
+      | select(($agent.agent | type) == "string")
+      | select(($agent.workspace_id | type) == "string")
+      | select(($agent.terminal_id | type) == "string")
+      | select(($agent.terminal_id | length) > 0)
+      | select(($agent.interactive_ready | type) == "boolean")
+      | select(($agent.agent_status | type) == "string")
+      | select($agent.agent_status | IN("idle","working","blocked","done","unknown"))
+      | select(($agent.state_change_seq | type) == "number")
+      | select(($agent.state_change_seq | floor) == $agent.state_change_seq)
+      | select($agent.state_change_seq >= 0)
+      | select($agent.state_change_seq <= 9007199254740991)
+      | select(($agent.revision | type) == "number")
+      | select(($agent.revision | floor) == $agent.revision)
+      | select($agent.revision >= 0 and $agent.revision <= 9007199254740991)
+      | select($name == "" or $agent.name == $name)
+      | select($agent.pane_id == $pane)
+      | select($agent.agent == $kind or $kind == "")
+      | select($agent.workspace_id == $workspace)
+      | select($expected_terminal == "" or $agent.terminal_id == $expected_terminal)
+      | select(
+          $agent.agent_session == null
+          or (
+            ($agent.agent_session | type) == "object"
+            and ($agent.agent_session.value | type) == "string"
+            and ($agent.agent_session.value | length) > 0
+          )
+        )
+      | select(
+          $expected_session == ""
+          or $agent.agent_session.value == $expected_session
+        )
+      | select(($require_session | not) or $agent.agent_session != null)
+      | select(($require_ready | not) or $agent.interactive_ready == true)
+      | select(($require_seq_advance | not) or $agent.state_change_seq > $minimum_seq)
+      | {
+          type: $result.type,
+          name: $agent.name,
+          pane: $agent.pane_id,
+          agent: $agent.agent,
+          workspace: $agent.workspace_id,
+          terminal: $agent.terminal_id,
+          interactive_ready: $agent.interactive_ready,
+          agent_status: $agent.agent_status,
+          state_change_seq: $agent.state_change_seq,
+          revision: $agent.revision,
+          agent_session: ($agent.agent_session.value // null)
+        }
+    '); then
+    fail "Herdr returned malformed or mismatched agent JSON: $output"
+  fi
+  DISPATCH_AGENT_JSON=$normalized
+  DISPATCH_AGENT_NAME=$(printf '%s\n' "$normalized" | jq -er '.name')
+  DISPATCH_AGENT_PANE=$(printf '%s\n' "$normalized" | jq -er '.pane')
+  DISPATCH_AGENT_KIND=$(printf '%s\n' "$normalized" | jq -er '.agent')
+  DISPATCH_AGENT_WORKSPACE=$(printf '%s\n' "$normalized" | jq -er '.workspace')
+  DISPATCH_AGENT_TERMINAL=$(printf '%s\n' "$normalized" | jq -er '.terminal')
+  DISPATCH_AGENT_READY=$(printf '%s\n' "$normalized" | jq -r '.interactive_ready')
+  DISPATCH_AGENT_STATUS=$(printf '%s\n' "$normalized" | jq -er '.agent_status')
+  DISPATCH_AGENT_SEQ=$(printf '%s\n' "$normalized" | jq -r '.state_change_seq')
+  DISPATCH_AGENT_REVISION=$(printf '%s\n' "$normalized" | jq -r '.revision')
+  DISPATCH_AGENT_SESSION=$(printf '%s\n' "$normalized" | jq -r '.agent_session // ""')
+}
+
+dispatch_agent_get() {
+  local target=$1 expected_pane=$2 expected_kind=$3 expected_workspace=$4
+  local output rc
+  if dispatch_run_herdr output agent get "$target"; then
+    :
+  else
+    rc=$?
+    fail "agent get failed for $target (exit $rc): $output"
+  fi
+  dispatch_parse_agent_result "$output" agent_info "${5:-}" "$expected_pane" \
+    "$expected_kind" "$expected_workspace" false false 0 "${6:-}" "${7:-}" "${8:-false}"
+}
+
+dispatch_verify_loaded_tokens() {
+  local pane_id=$1 role=$2 parent=$3 relation=$4 task=$5 run=$6
+  local expected_keys
+
+  if [[ "$role" == controller ]]; then
+    expected_keys='["hod_role","hod_run","hod_task"]'
+  else
+    expected_keys='["hod_parent","hod_relation","hod_role","hod_run","hod_task"]'
+  fi
+  if ! printf '%s\n' "$DISPATCH_PANE_JSON" | jq -e \
+    --argjson expected "$expected_keys" \
+    '(.tokens | type == "object") and ((.tokens | keys | sort) == $expected)' \
+    >/dev/null; then
+    fail "pane $pane_id metadata readback did not contain the exact required token set"
+  fi
+  if ! printf '%s\n' "$DISPATCH_PANE_JSON" | jq -e \
+    --arg role "$role" \
+    --arg parent "$parent" \
+    --arg relation "$relation" \
+    --arg task "$task" \
+    --arg run "$run" \
+    '(.tokens.hod_role == $role)
+     and (.tokens.hod_task == $task)
+     and (.tokens.hod_run == $run)
+     and ($role == "controller" or
+       ((.tokens.hod_parent == $parent) and (.tokens.hod_relation == $relation)))' \
+    >/dev/null; then
+    fail "pane $pane_id metadata readback values are not authoritative"
+  fi
+  if ! printf '%s\n' "$DISPATCH_PANE_JSON" | jq -e \
+    '(.tokens.hod_task | type == "string")
+     and (.tokens.hod_task | test("^[a-z0-9][a-z0-9._-]{0,47}$"))
+     and (.tokens.hod_run | type == "string")
+     and (.tokens.hod_run | test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))' \
+    >/dev/null; then
+    fail "pane $pane_id metadata task or run is not a bounded safe identifier"
+  fi
+}
+
+dispatch_verify_controller_binding() {
+  local pane_id=$1 run=$2
+  dispatch_pane_get "$pane_id"
+  if ! printf '%s\n' "$DISPATCH_PANE_JSON" | jq -e \
+    --arg run "$run" \
+    '(.tokens | type == "object")
+     and ((.tokens | keys | sort) == ["hod_role","hod_run","hod_task"])
+     and (.tokens.hod_role == "controller")
+     and (.tokens.hod_run == $run)
+     and (.tokens.hod_task | type == "string")
+     and (.tokens.hod_task | test("^[a-z0-9][a-z0-9._-]{0,47}$"))
+     and (.tokens.hod_run | test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))' \
+  >/dev/null; then
+    fail "controller binding is not authoritative for the requested run"
+  fi
+  if (( $# >= 7 )); then
+    dispatch_require_loaded_controller_identity "$3" "$4" "$5" "$6" "$7"
+  fi
+}
+
+dispatch_require_loaded_controller_identity() {
+  local expected_workspace=$1 expected_terminal=$2 expected_session=$3
+  local expected_agent=$4 minimum_revision=$5
+  [[ "$DISPATCH_PANE_WORKSPACE" == "$expected_workspace" ]] || \
+    fail "controller workspace identity changed during dispatch"
+  [[ "$DISPATCH_PANE_TERMINAL" == "$expected_terminal" ]] || \
+    fail "controller terminal identity changed during dispatch"
+  [[ "$DISPATCH_PANE_SESSION" == "$expected_session" ]] || \
+    fail "controller session identity changed during dispatch"
+  [[ "$DISPATCH_PANE_AGENT" == "$expected_agent" ]] || \
+    fail "controller agent kind changed during dispatch"
+  (( DISPATCH_PANE_REVISION >= minimum_revision )) || \
+    fail "controller revision regressed during dispatch"
+}
+
+dispatch_validate_start_controller_state() {
+  local run=$1
+  if ! printf '%s\n' "$DISPATCH_PANE_JSON" | jq -e \
+    --arg run "$run" '
+      (.tokens | type == "object")
+      and (
+        ((.tokens | length) == 0)
+        or (
+          ((.tokens | keys | sort) == ["hod_role","hod_run","hod_task"])
+          and (.tokens.hod_role == "controller")
+          and (.tokens.hod_run == $run)
+          and (.tokens.hod_task | type == "string")
+          and (.tokens.hod_task | test("^[a-z0-9][a-z0-9._-]{0,47}$"))
+          and (.tokens.hod_run | test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))
+        )
+      )' >/dev/null; then
+    fail "controller pane has child, partial, or invalid HOD tokens; refusing to bootstrap it"
+  fi
+}
+
+dispatch_token() {
+  local name=$1
+  printf '%s\n' "$DISPATCH_PANE_JSON" | jq -er --arg name "$name" \
+    '.tokens[$name] | strings | select(length > 0)'
+}
+
+dispatch_verify_tokens() {
+  local pane_id=$1 role=$2 parent=$3 relation=$4 task=$5 run=$6
+
+  dispatch_pane_get "$pane_id"
+  dispatch_verify_loaded_tokens "$@"
+}
+
+dispatch_report_metadata() {
+  local pane_id=$1 role=$2 parent=$3 relation=$4 task=$5 run=$6
+  local output rc
+  local -a report_args=(
+    pane report-metadata "$pane_id"
+    --source hod
+    --ttl-ms 86400000
+  )
+
+  if [[ "$role" == controller ]]; then
+    report_args+=(--clear-token hod_parent --clear-token hod_relation)
+    report_args+=(--token "hod_role=$role")
+    report_args+=(--token "hod_task=$task")
+    report_args+=(--token "hod_run=$run")
+  else
+    report_args+=(--token "hod_role=$role")
+    report_args+=(--token "hod_parent=$parent")
+    report_args+=(--token "hod_relation=$relation")
+    report_args+=(--token "hod_task=$task")
+    report_args+=(--token "hod_run=$run")
+  fi
+
+  if dispatch_run_herdr output "${report_args[@]}"; then
+    return 0
+  else
+    rc=$?
+  fi
+  fail "report-metadata failed for $pane_id (exit $rc): $output"
+}
+
+dispatch_report_and_verify() {
+  dispatch_report_metadata "$@"
+  dispatch_verify_tokens "$@"
+}
+
+dispatch_relation_for_role() {
+  case $1 in
+    worker) printf 'delegate\n' ;;
+    advisor) printf 'consult\n' ;;
+    reviewer|tester) printf 'verify\n' ;;
+    *) fail "unsupported dispatch role: $1" ;;
+  esac
+}
+
+dispatch_split_child() {
+  local pane_id=$1 direction=$2 cwd=$3 expected_workspace=$4
+  local output rc child terminal parsed
+  if dispatch_run_herdr output pane split \
+    "$pane_id" --direction "$direction" --cwd "$cwd" --no-focus; then
+    :
+  else
+    rc=$?
+    fail "pane split failed (exit $rc): $output"
+  fi
+  if ! parsed=$(printf '%s\n' "$output" | jq -cer \
+    --arg workspace "$expected_workspace" \
+    '.result.pane
+     | select(type == "object")
+     | select(.workspace_id == $workspace)
+     | select((.pane_id | type) == "string" and (.pane_id | length) > 0)
+     | select((.terminal_id | type) == "string" and (.terminal_id | length) > 0)
+     | [.pane_id, .terminal_id] | @tsv'); then
+    fail "pane split returned no child in the controller workspace: $output"
+  fi
+  IFS=$'\t' read -r child terminal <<<"$parsed"
+  dispatch_validate_herdr_id 'child pane ID' "$child"
+  dispatch_validate_herdr_id 'child terminal ID' "$terminal"
+  [[ "$child" != "$pane_id" ]] || fail "pane split returned the controller pane as its child"
+  DISPATCH_NEW_CHILD_WORKSPACE=$expected_workspace
+  DISPATCH_NEW_CHILD_CWD=$(cd -- "$cwd" && pwd -P) || \
+    fail "could not preserve the split child cwd identity"
+  DISPATCH_NEW_CHILD_TERMINAL=$terminal
+  DISPATCH_NEW_CHILD=$child
+}
+
+dispatch_verify_loaded_child_origin() {
+  local expected_workspace=$1 expected_cwd=$2 actual_cwd
+  [[ "$DISPATCH_PANE_WORKSPACE" == "$expected_workspace" ]] || \
+    fail "split child is in a different workspace: $DISPATCH_PANE_WORKSPACE (controller $expected_workspace)"
+  [[ "$DISPATCH_PANE_CWD" == /* && -d "$DISPATCH_PANE_CWD" ]] || \
+    fail "split child did not report an existing absolute cwd"
+  actual_cwd=$(cd -- "$DISPATCH_PANE_CWD" && pwd -P) || \
+    fail "split child cwd could not be resolved"
+  [[ "$actual_cwd" == "$expected_cwd" ]] || \
+    fail "split child cwd changed: $actual_cwd (expected $expected_cwd)"
+  [[ -n "$DISPATCH_NEW_CHILD_TERMINAL" && \
+    "$DISPATCH_PANE_TERMINAL" == "$DISPATCH_NEW_CHILD_TERMINAL" ]] || \
+    fail "split child terminal identity changed"
+}
+
+dispatch_require_fresh_split_child() {
+  local expected_workspace=$1 expected_cwd=$2
+  dispatch_verify_loaded_child_origin "$expected_workspace" "$expected_cwd"
+  [[ -z "$DISPATCH_PANE_AGENT" && -z "$DISPATCH_PANE_SESSION" ]] || \
+    fail "split child was claimed by an agent before topology binding"
+  [[ "$DISPATCH_PANE_REVISION" == 0 ]] || \
+    fail "split child revision advanced before topology binding"
+  [[ "$DISPATCH_PANE_STATUS" == idle || "$DISPATCH_PANE_STATUS" == unknown ]] || \
+    fail "split child entered an unsafe state before topology binding: $DISPATCH_PANE_STATUS"
+  printf '%s\n' "$DISPATCH_PANE_JSON" | jq -e \
+    '(.tokens | type == "object") and ((.tokens | length) == 0)' \
+    >/dev/null || fail "split child already has metadata; refusing to overwrite it"
+}
+
+dispatch_require_bound_unstarted_child() {
+  local expected_workspace=$1 expected_cwd=$2 minimum_revision=$3
+  dispatch_verify_loaded_child_origin "$expected_workspace" "$expected_cwd"
+  [[ -z "$DISPATCH_PANE_AGENT" && -z "$DISPATCH_PANE_SESSION" ]] || \
+    fail "split child was claimed by an agent during topology binding"
+  (( DISPATCH_PANE_REVISION >= minimum_revision )) || \
+    fail "split child revision regressed during topology binding"
+  [[ "$DISPATCH_PANE_STATUS" == idle || "$DISPATCH_PANE_STATUS" == unknown ]] || \
+    fail "split child entered an unsafe state during topology binding: $DISPATCH_PANE_STATUS"
+}
+
+dispatch_json_error_code_is() {
+  local output=$1 expected=$2 actual
+  if ! actual=$(printf '%s\n' "$output" | jq -er '.error.code | strings' 2>/dev/null); then
+    return 1
+  fi
+  [[ "$actual" == "$expected" ]]
+}
+
+dispatch_agent_start() {
+  local agent_name=$1 kind=$2 pane_id=$3 timeout=$4 workspace=$5 expected_terminal=$6
+  shift 6
+  local output rc attempt=1 max_attempts=10
+  local -a start_args=(agent start "$agent_name" --kind "$kind" --pane "$pane_id"
+    --timeout "$timeout" -- "$@")
+
+  while (( attempt <= max_attempts )); do
+    if dispatch_run_herdr output "${start_args[@]}"; then
+      dispatch_parse_agent_result "$output" agent_started "$agent_name" "$pane_id" \
+        "$kind" "$workspace" false false 0 '' "$expected_terminal"
+      return 0
+    else
+      rc=$?
+    fi
+    if ! dispatch_json_error_code_is "$output" agent_pane_busy; then
+      if dispatch_json_error_code_is "$output" agent_name_taken; then
+        DISPATCH_AGENT_START_ATTEMPTED=false
+      fi
+      fail "agent start failed (exit $rc): $output"
+    fi
+    if (( attempt == max_attempts )); then
+      fail "agent start exhausted $max_attempts agent_pane_busy attempts (exit $rc): $output"
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+}
+
+dispatch_agent_prompt() {
+  local pane_id=$1 timeout=$2 name=$3 kind=$4 workspace=$5 minimum_seq=$6
+  local expected_session=$7 expected_terminal=$8 require_session=${9:-true}
+  local output rc
+  DISPATCH_PROMPT_ATTEMPTED=true
+  if dispatch_run_herdr output agent prompt "$name" "$DISPATCH_PROMPT" \
+    --wait \
+    --until working \
+    --until blocked \
+    --until done \
+    --until idle \
+    --until unknown \
+    --timeout "$timeout"; then
+    :
+  else
+    rc=$?
+    if dispatch_json_error_code_is "$output" agent_prompt_stalled; then
+      fail "agent prompt stalled without an observed state change (exit $rc): $output"
+    fi
+    fail "agent prompt failed (exit $rc): $output"
+  fi
+  dispatch_parse_agent_result "$output" agent_prompted "$name" "$pane_id" "$kind" "$workspace" \
+    true true "$minimum_seq" "$expected_session" "$expected_terminal" "$require_session"
+}
+
+dispatch_runtime_surface_ready() {
+  local target=$1 kind=$2 output rc
+  [[ "$kind" == codex ]] || return 0
+  if dispatch_run_herdr output agent read "$target" \
+    --source detection --lines 120 --format text; then
+    :
+  else
+    rc=$?
+    fail "agent read failed during Codex readiness check (exit $rc): $output"
+  fi
+  grep -qF 'OpenAI Codex' <<<"$output" &&
+    grep -Eq '^[[:space:]]*›' <<<"$output"
+}
+
+dispatch_wait_agent_ready() {
+  local target=$1 name=$2 pane_id=$3 kind=$4 workspace=$5 timeout=$6
+  local expected_terminal=$7 expected_session=$8 minimum_seq=$9 now deadline
+  now=$(date +%s) || fail "could not read the readiness clock"
+  deadline=$(( now + ((timeout + 999) / 1000) ))
+  while :; do
+    dispatch_agent_get "$target" "$pane_id" "$kind" "$workspace" "$name" \
+      "$expected_session" "$expected_terminal"
+    (( DISPATCH_AGENT_SEQ >= minimum_seq )) || \
+      fail "agent $name state sequence regressed during start dispatch"
+    [[ -n "$expected_session" ]] || expected_session=$DISPATCH_AGENT_SESSION
+    if [[ "$DISPATCH_AGENT_READY" == true && "$DISPATCH_AGENT_STATUS" != working ]] &&
+      dispatch_runtime_surface_ready "$target" "$kind"; then
+      return 0
+    fi
+    now=$(date +%s) || fail "could not read the readiness clock"
+    if (( now >= deadline )); then
+      fail "agent $name did not become interactive and non-working within the requested readiness timeout"
+    fi
+    sleep 0.1
+  done
+}
+
+dispatch_require_child_workspace() {
+  local child=$1 expected_workspace=$2
+  dispatch_pane_get "$child"
+  [[ "$DISPATCH_PANE_WORKSPACE" == "$expected_workspace" ]] || \
+    fail "final child workspace changed: $DISPATCH_PANE_WORKSPACE (expected $expected_workspace)"
+}
+
+dispatch_require_child_settled() {
+  local child=$1
+  dispatch_pane_get "$child"
+  [[ "$DISPATCH_PANE_STATUS" != working ]] || \
+    fail "child pane is working; refusing to submit another prompt"
+}
+
+dispatch_validate_native_model() {
+  local model=$1 count=0 expect_value=0 value
+  for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
+    if (( expect_value )); then
+      [[ "$value" == "$model" ]] || \
+        usage_error "advisor native model must exactly match --advisor-choice: $model"
+      count=$((count + 1))
+      expect_value=0
+    elif [[ "$value" == -m || "$value" == --model ]]; then
+      expect_value=1
+    fi
+  done
+  (( expect_value == 0 )) || usage_error "advisor model flag requires a value"
+  (( count == 1 )) || usage_error "advisor start requires exactly one matching -m or --model native argument"
+}
+
+dispatch_validate_advisor_selection() {
+  local role=$1 choice=$2 model=$3 kind=$4
+  if [[ "$role" != advisor ]]; then
+    [[ -z "$choice" && -z "$model" ]] || \
+      usage_error "--advisor-choice and --advisor-model are valid only for advisor dispatch"
+    return 0
+  fi
+  [[ -n "$choice" && -n "$model" ]] || \
+    usage_error "advisor dispatch requires --advisor-choice and --advisor-model"
+  case "$choice" in
+    fable|gpt-5.6-sol|opus) ;;
+    *) usage_error "advisor choice must be fable, gpt-5.6-sol, or opus" ;;
+  esac
+  [[ "$model" == "$choice" ]] || \
+    usage_error "advisor model must exactly match advisor choice"
+  case "$choice:$kind" in
+    fable:claude|opus:claude|gpt-5.6-sol:codex) ;;
+    fable:*|opus:*)
+      usage_error "${choice} advisor requires --kind claude" ;;
+    gpt-5.6-sol:*)
+      usage_error "gpt-5.6-sol advisor requires --kind codex" ;;
+  esac
+  dispatch_validate_native_model "$model"
+}
+
+dispatch_codex_boundary_config_is_safe() {
+  case $1 in
+    features.multi_agent=false|model=*|model_reasoning_effort=*|\
+    model_reasoning_summary=*|model_verbosity=*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+dispatch_validate_boundary_role_args() {
+  local role=$1 kind=$2 option value config index=0
+  local count=${#DISPATCH_NATIVE_ARGS[@]}
+  [[ "$role" != worker ]] || return 0
+
+  while (( index < count )); do
+    option=${DISPATCH_NATIVE_ARGS[$index]}
+    case $kind in
+      claude)
+        case $option in
+          -m|--model|--settings|--effort|-n|--name|\
+          --disallowedTools|--disallowed-tools|--max-budget-usd)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            value=${DISPATCH_NATIVE_ARGS[$((index + 1))]}
+            [[ -n "$value" ]] || usage_error "$option requires a value"
+            if [[ "$option" == --settings && \
+              ( "$value" == *'{'* || "$value" == *'['* || "$value" == *\\* ) ]]; then
+              usage_error "$role dispatch requires file-based Claude settings"
+            fi
+            index=$((index + 2))
+            ;;
+          -m=*|--model=*|--effort=*|-n=*|--name=*|\
+          --disallowedTools=*|--disallowed-tools=*|--max-budget-usd=*)
+            index=$((index + 1))
+            ;;
+          --ax-screen-reader|--disable-slash-commands|\
+          --exclude-dynamic-system-prompt-sections|--no-chrome|\
+          --strict-mcp-config|--verbose)
+            index=$((index + 1))
+            ;;
+          *) usage_error "$role Claude dispatch rejects unsupported native argument: $option" ;;
+        esac
+        ;;
+      codex)
+        case $option in
+          -m|--model)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ -n "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" ]] || \
+              usage_error "$option requires a value"
+            index=$((index + 2))
+            ;;
+          -s|--sandbox)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" == read-only ]] || \
+              usage_error "$role Codex dispatch requires a read-only sandbox override"
+            index=$((index + 2))
+            ;;
+          -c|--config)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            config=${DISPATCH_NATIVE_ARGS[$((index + 1))]}
+            dispatch_codex_boundary_config_is_safe "$config" || \
+              usage_error "$role Codex dispatch forbids this config override"
+            index=$((index + 2))
+            ;;
+          -m=*|--model=*|-s=read-only|--sandbox=read-only)
+            index=$((index + 1))
+            ;;
+          -s=*|--sandbox=*)
+            usage_error "$role Codex dispatch requires a read-only sandbox override"
+            ;;
+          -c=*)
+            config=${option#-c=}
+            dispatch_codex_boundary_config_is_safe "$config" || \
+              usage_error "$role Codex dispatch forbids this config override"
+            index=$((index + 1))
+            ;;
+          --config=*)
+            config=${option#--config=}
+            dispatch_codex_boundary_config_is_safe "$config" || \
+              usage_error "$role Codex dispatch forbids this config override"
+            index=$((index + 1))
+            ;;
+          --no-alt-screen|--strict-config)
+            index=$((index + 1))
+            ;;
+          *) usage_error "$role Codex dispatch rejects unsupported native argument: $option" ;;
+        esac
+        ;;
+      grok)
+        case $option in
+          -m|--model|--reasoning-effort|--effort|--deny|\
+          --disallowed-tools|--max-turns)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ -n "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" ]] || \
+              usage_error "$option requires a value"
+            index=$((index + 2))
+            ;;
+          --sandbox)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" == read-only ]] || \
+              usage_error "$role Grok dispatch requires a read-only sandbox override"
+            index=$((index + 2))
+            ;;
+          -m=*|--model=*|--reasoning-effort=*|--effort=*|--deny=*|\
+          --disallowed-tools=*|--max-turns=*|--sandbox=read-only|\
+          --disable-web-search|--no-memory|--no-plan|--no-subagents|\
+          --no-alt-screen|--minimal|--fullscreen|--verbatim)
+            index=$((index + 1))
+            ;;
+          --sandbox=*)
+            usage_error "$role Grok dispatch requires a read-only sandbox override"
+            ;;
+          *) usage_error "$role Grok dispatch rejects unsupported native argument: $option" ;;
+        esac
+        ;;
+    esac
+  done
+}
+
+dispatch_validate_fresh_role_args() {
+  local role=$1 kind=$2 value previous=''
+  for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
+    if [[ "$kind" == claude && "$previous" == --settings && "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native settings"
+    fi
+    if [[ "$kind" == codex && ( "$previous" == -c || "$previous" == --config ) &&
+      "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native config"
+    fi
+    if [[ "$kind" == grok && "$previous" == --sandbox ]]; then
+      case $value in
+        off|none|disabled|unrestricted|danger-full-access)
+          usage_error "$role dispatch forbids native permission bypass arguments"
+          ;;
+      esac
+    fi
+    case $value in
+      --dangerously-*|--allow-dangerously-*|--always-approve|--always-approve=*|\
+      --yolo|--yolo=*|*bypassPermissions*|*danger-full-access*)
+        usage_error "$role dispatch forbids native permission bypass arguments"
+        ;;
+    esac
+    if [[ "$kind" == claude && "$value" == --settings=* && "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native settings"
+    fi
+    if [[ "$kind" == codex && ( "$value" == -c=* || "$value" == --config=* ) &&
+      "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native config"
+    fi
+    if [[ "$kind" == grok ]]; then
+      case $value in
+        --sandbox=off|--sandbox=none|--sandbox=disabled|\
+        --sandbox=unrestricted|--sandbox=danger-full-access)
+          usage_error "$role dispatch forbids native permission bypass arguments"
+          ;;
+      esac
+    fi
+    if [[ "$role" != worker ]]; then
+      case $value in
+        resume|fork|cloud|--continue|--continue=*|--resume|--resume=*|\
+        --from-pr|--from-pr=*|--teleport|--teleport=*|--cloud|--cloud=*|\
+        --fork-session|--fork-session=*)
+          usage_error "$role dispatch requires a fresh, permission-bounded agent session"
+          ;;
+        -c|-c=*|-r|-r=*)
+          [[ "$kind" != claude && "$kind" != grok ]] || \
+            usage_error "$role dispatch requires a fresh $kind session"
+          ;;
+      esac
+    fi
+    previous=$value
+  done
+  dispatch_validate_boundary_role_args "$role" "$kind"
+}
+
+cmd_dispatch_start() {
+  local role='' task='' run='' kind='' cwd='' direction='' timeout='' agent_name=''
+  local advisor_choice='' advisor_model=''
+  local controller_workspace controller_terminal controller_session controller_agent controller_revision
+  local child child_revision relation expected_seq expected_session expected_terminal launch_seq receipt
+  local -a native_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --name|--role|--task|--run|--kind|--cwd|--direction|--timeout|--advisor-choice|--advisor-model)
+        [[ $# -ge 2 ]] || usage_error "$1 requires a value"
+        case $1 in
+          --name) agent_name=$2 ;;
+          --role) role=$2 ;;
+          --task) task=$2 ;;
+          --run) run=$2 ;;
+          --kind) kind=$2 ;;
+          --cwd) cwd=$2 ;;
+          --direction) direction=$2 ;;
+          --timeout) timeout=$2 ;;
+          --advisor-choice) advisor_choice=$2 ;;
+          --advisor-model) advisor_model=$2 ;;
+        esac
+        shift 2
+        ;;
+      --)
+        shift
+        native_args=("$@")
+        break
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        usage_error "unknown dispatch start option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$agent_name" ]] || usage_error "dispatch start requires --name"
+  [[ -n "$role" ]] || usage_error "dispatch start requires --role"
+  [[ -n "$task" ]] || usage_error "dispatch start requires --task"
+  [[ -n "$run" ]] || usage_error "dispatch start requires --run"
+  [[ -n "$kind" ]] || usage_error "dispatch start requires --kind"
+  [[ -n "$cwd" ]] || usage_error "dispatch start requires --cwd"
+  [[ -n "$direction" ]] || usage_error "dispatch start requires --direction"
+  [[ -n "$timeout" ]] || usage_error "dispatch start requires --timeout"
+  case $role in
+    worker|advisor|reviewer|tester) ;;
+    *) usage_error "role must be worker, advisor, reviewer, or tester" ;;
+  esac
+  dispatch_validate_task "$task"
+  dispatch_validate_run "$run"
+  dispatch_validate_kind "$kind"
+  dispatch_validate_cwd "$cwd"
+  dispatch_validate_direction "$direction"
+  dispatch_validate_timeout "$timeout"
+  [[ "$agent_name" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || \
+    usage_error "agent name must be a bounded safe name"
+  DISPATCH_NATIVE_ARGS=("${native_args[@]}")
+  dispatch_validate_advisor_selection "$role" "$advisor_choice" "$advisor_model" "$kind"
+  dispatch_validate_fresh_role_args "$role" "$kind"
+
+  dispatch_require_controller
+  dispatch_prepare_runtime "$timeout"
+  dispatch_read_direct_prompt
+  dispatch_probe_capabilities
+  dispatch_help_lists_value "$DISPATCH_START_HELP" "$kind" || \
+    usage_error "kind is not advertised by Herdr agent start: $kind"
+  dispatch_help_lists_value "$DISPATCH_SPLIT_HELP" "$direction" || \
+    usage_error "direction is not advertised by Herdr pane split: $direction"
+
+  dispatch_acquire_lock "$timeout"
+  dispatch_pane_get "$DISPATCH_CONTROLLER_PANE"
+  dispatch_validate_start_controller_state "$run"
+  controller_workspace=$DISPATCH_PANE_WORKSPACE
+  controller_terminal=$DISPATCH_PANE_TERMINAL
+  controller_session=$DISPATCH_PANE_SESSION
+  controller_agent=$DISPATCH_PANE_AGENT
+  controller_revision=$DISPATCH_PANE_REVISION
+  dispatch_stage_controller_rollback "$DISPATCH_CONTROLLER_PANE"
+  DISPATCH_METADATA_ROLLBACK=true
+  dispatch_report_and_verify "$DISPATCH_CONTROLLER_PANE" controller '' '' "$task" "$run"
+  dispatch_require_loaded_controller_identity "$controller_workspace" \
+    "$controller_terminal" "$controller_session" "$controller_agent" "$controller_revision"
+  controller_revision=$DISPATCH_PANE_REVISION
+
+  dispatch_split_child "$DISPATCH_CONTROLLER_PANE" "$direction" \
+    "$DISPATCH_CWD" "$controller_workspace"
+  child=$DISPATCH_NEW_CHILD
+  dispatch_pane_get "$child"
+  dispatch_require_fresh_split_child "$controller_workspace" "$DISPATCH_CWD"
+  child_revision=$DISPATCH_PANE_REVISION
+  relation=$(dispatch_relation_for_role "$role")
+  dispatch_report_and_verify "$child" "$role" "$DISPATCH_CONTROLLER_PANE" \
+    "$relation" "$task" "$run"
+  dispatch_require_bound_unstarted_child "$controller_workspace" "$DISPATCH_CWD" \
+    "$child_revision"
+  DISPATCH_AGENT_START_ATTEMPTED=true
+  dispatch_agent_start "$agent_name" "$kind" "$child" "$timeout" \
+    "$controller_workspace" "$DISPATCH_NEW_CHILD_TERMINAL" "${native_args[@]}"
+  launch_seq=$DISPATCH_AGENT_SEQ
+  dispatch_wait_agent_ready "$agent_name" "$agent_name" "$child" "$kind" \
+    "$controller_workspace" "$timeout" "$DISPATCH_AGENT_TERMINAL" \
+    "$DISPATCH_AGENT_SESSION" "$launch_seq"
+  expected_seq=$DISPATCH_AGENT_SEQ
+  expected_session=$DISPATCH_AGENT_SESSION
+  expected_terminal=$DISPATCH_AGENT_TERMINAL
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  dispatch_report_and_verify "$child" "$role" "$DISPATCH_CONTROLLER_PANE" \
+    "$relation" "$task" "$run"
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  dispatch_agent_get "$child" "$child" "$kind" "$controller_workspace" \
+    "$agent_name" "$expected_session" "$expected_terminal"
+  [[ "$DISPATCH_AGENT_READY" == true ]] || \
+    fail "child agent is no longer interactive-ready; refusing to submit the first prompt"
+  [[ "$DISPATCH_AGENT_STATUS" != working ]] || \
+    fail "authoritative agent get reports a working child; refusing to submit the first prompt"
+  [[ "$DISPATCH_AGENT_SEQ" == "$expected_seq" ]] || \
+    fail "child agent state changed during start dispatch; refusing to submit the first prompt"
+  dispatch_require_child_settled "$child"
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  dispatch_verify_controller_binding "$DISPATCH_CONTROLLER_PANE" "$run" \
+    "$controller_workspace" "$controller_terminal" "$controller_session" \
+    "$controller_agent" "$controller_revision"
+  dispatch_agent_prompt "$child" "$timeout" "$agent_name" "$kind" "$controller_workspace" \
+    "$DISPATCH_AGENT_SEQ" "$DISPATCH_AGENT_SESSION" "$DISPATCH_AGENT_TERMINAL" false
+  if [[ -z "$DISPATCH_AGENT_SESSION" &&
+    "$DISPATCH_AGENT_STATUS" != working && "$DISPATCH_AGENT_STATUS" != blocked ]]; then
+    fail "sessionless first delivery did not enter working or blocked; delivery is ambiguous"
+  fi
+  if [[ "$role" == advisor ]]; then
+    receipt=$(jq -cn \
+      --arg pane_id "$child" --arg name "$agent_name" --arg role "$role" \
+      --arg relation "$relation" --arg task "$task" --arg run "$run" \
+      --arg advisor_choice "$advisor_choice" --arg requested_model "$advisor_model" \
+      '{pane_id:$pane_id,name:$name,role:$role,relation:$relation,task:$task,run:$run,
+        advisor_choice:$advisor_choice,requested_model:$requested_model,runtime_model_verified:false}')
+  else
+    receipt=$(jq -cn \
+      --arg pane_id "$child" --arg name "$agent_name" --arg role "$role" \
+      --arg relation "$relation" --arg task "$task" --arg run "$run" \
+      '{pane_id:$pane_id,name:$name,role:$role,relation:$relation,task:$task,run:$run}')
+  fi
+  dispatch_finish
+  printf '%s\n' "$receipt"
+}
+
+cmd_dispatch_prompt() {
+  local child='' kind='' task='' run='' timeout=''
+  local controller_workspace controller_terminal controller_session controller_agent controller_revision
+  local child_workspace child_terminal
+  local role parent relation current_run current_task expected_relation
+  local expected_name expected_session expected_terminal expected_seq
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --pane|--child-pane)
+        [[ $# -ge 2 ]] || usage_error "$1 requires a pane ID"
+        child=$2
+        shift 2
+        ;;
+      --kind|--task|--run|--timeout)
+        [[ $# -ge 2 ]] || usage_error "$1 requires a value"
+        case $1 in
+          --kind) kind=$2 ;;
+          --task) task=$2 ;;
+          --run) run=$2 ;;
+          --timeout) timeout=$2 ;;
+        esac
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        usage_error "unknown dispatch prompt option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$child" ]] || usage_error "dispatch prompt requires --pane"
+  [[ -n "$kind" ]] || usage_error "dispatch prompt requires --kind"
+  [[ -n "$task" ]] || usage_error "dispatch prompt requires --task"
+  [[ -n "$run" ]] || usage_error "dispatch prompt requires --run"
+  [[ -n "$timeout" ]] || usage_error "dispatch prompt requires --timeout"
+  dispatch_validate_herdr_id 'child pane ID' "$child"
+  dispatch_validate_kind "$kind"
+  dispatch_validate_task "$task"
+  dispatch_validate_run "$run"
+  dispatch_validate_timeout "$timeout"
+
+  dispatch_require_controller
+  dispatch_prepare_runtime "$timeout"
+  dispatch_read_direct_prompt
+  dispatch_probe_capabilities
+  dispatch_help_lists_value "$DISPATCH_START_HELP" "$kind" || \
+    usage_error "kind is not advertised by Herdr agent start: $kind"
+  dispatch_acquire_lock "$timeout"
+  dispatch_verify_controller_binding "$DISPATCH_CONTROLLER_PANE" "$run"
+  controller_workspace=$DISPATCH_PANE_WORKSPACE
+  controller_terminal=$DISPATCH_PANE_TERMINAL
+  controller_session=$DISPATCH_PANE_SESSION
+  controller_agent=$DISPATCH_PANE_AGENT
+  controller_revision=$DISPATCH_PANE_REVISION
+  dispatch_stage_controller_rollback "$DISPATCH_CONTROLLER_PANE"
+  dispatch_pane_get "$child"
+  child_workspace=$DISPATCH_PANE_WORKSPACE
+  child_terminal=$DISPATCH_PANE_TERMINAL
+  [[ "$child_workspace" == "$controller_workspace" ]] || \
+    fail "child pane is in a different workspace: $child_workspace (controller $controller_workspace)"
+
+  role=$(dispatch_token hod_role)
+  parent=$(dispatch_token hod_parent)
+  relation=$(dispatch_token hod_relation)
+  current_run=$(dispatch_token hod_run)
+  current_task=$(dispatch_token hod_task)
+  case $role in
+    worker|reviewer|tester) ;;
+    advisor) fail "advisor redirect requires a fresh consult; use dispatch start with an explicit advisor choice" ;;
+    *) fail "child pane has an unsupported authoritative role: $role" ;;
+  esac
+  dispatch_verify_tokens "$child" "$role" "$parent" "$relation" \
+    "$current_task" "$current_run"
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  [[ "$DISPATCH_PANE_STATUS" != working ]] || \
+    fail "child pane is working; refusing to mutate metadata or submit another prompt"
+  expected_relation=$(dispatch_relation_for_role "$role")
+  [[ "$parent" == "$DISPATCH_CONTROLLER_PANE" ]] || \
+    fail "child pane parent does not match HERDR_PANE_ID"
+  [[ "$current_run" == "$run" ]] || \
+    fail "child pane run does not match requested run"
+  [[ "$relation" == "$expected_relation" ]] || \
+    fail "child pane relation does not match its authoritative role"
+
+  dispatch_agent_get "$child" "$child" "$kind" "$controller_workspace" '' '' '' true
+  [[ "$DISPATCH_AGENT_READY" == true ]] || \
+    fail "child agent is not interactive-ready; refusing to mutate metadata or submit a prompt"
+  [[ "$DISPATCH_AGENT_STATUS" != working ]] || \
+    fail "authoritative agent get reports a working child; refusing to mutate metadata or submit a prompt"
+  [[ -n "$DISPATCH_AGENT_SESSION" ]] || \
+    fail "child agent has no authoritative session identity"
+  expected_name=$DISPATCH_AGENT_NAME
+  expected_session=$DISPATCH_AGENT_SESSION
+  expected_terminal=$DISPATCH_AGENT_TERMINAL
+  expected_seq=$DISPATCH_AGENT_SEQ
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  [[ "$DISPATCH_PANE_AGENT" == "$kind" && \
+    "$DISPATCH_PANE_SESSION" == "$expected_session" && \
+    "$DISPATCH_PANE_TERMINAL" == "$expected_terminal" ]] || \
+    fail "child pane owner identity changed before metadata mutation"
+  dispatch_stage_child_rollback "$child"
+  DISPATCH_METADATA_ROLLBACK=true
+  dispatch_report_and_verify "$DISPATCH_CONTROLLER_PANE" controller '' '' "$task" "$run"
+  dispatch_require_loaded_controller_identity "$controller_workspace" \
+    "$controller_terminal" "$controller_session" "$controller_agent" "$controller_revision"
+  controller_revision=$DISPATCH_PANE_REVISION
+  dispatch_report_metadata "$child" "$role" "$DISPATCH_CONTROLLER_PANE" \
+    "$expected_relation" "$task" "$run"
+  dispatch_verify_tokens "$child" "$role" "$DISPATCH_CONTROLLER_PANE" \
+    "$expected_relation" "$task" "$run"
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  [[ "$DISPATCH_PANE_STATUS" != working ]] || \
+    fail "child pane is working; refusing to submit another prompt"
+  dispatch_agent_get "$child" "$child" "$kind" "$controller_workspace" \
+    "$expected_name" "$expected_session" "$expected_terminal" true
+  [[ "$DISPATCH_AGENT_READY" == true ]] || \
+    fail "child agent is no longer interactive-ready; refusing to submit a prompt"
+  [[ "$DISPATCH_AGENT_STATUS" != working ]] || \
+    fail "authoritative agent get reports a working child; refusing to submit another prompt"
+  [[ "$DISPATCH_AGENT_SEQ" == "$expected_seq" ]] || \
+    fail "child agent state changed during dispatch; refusing to submit a prompt"
+  dispatch_runtime_surface_ready "$child" "$kind" || \
+    fail "child runtime prompt surface is not ready; refusing to submit a prompt"
+  dispatch_require_child_settled "$child"
+  dispatch_require_child_workspace "$child" "$controller_workspace"
+  dispatch_verify_controller_binding "$DISPATCH_CONTROLLER_PANE" "$run" \
+    "$controller_workspace" "$controller_terminal" "$controller_session" \
+    "$controller_agent" "$controller_revision"
+  dispatch_agent_prompt "$child" "$timeout" "$DISPATCH_AGENT_NAME" \
+    "$DISPATCH_AGENT_KIND" "$controller_workspace" "$DISPATCH_AGENT_SEQ" \
+    "$DISPATCH_AGENT_SESSION" "$DISPATCH_AGENT_TERMINAL" true
+  dispatch_finish
+}
+
+cmd_dispatch() {
+  [[ $# -gt 0 ]] || usage_error "dispatch requires start or prompt"
+  local sub=$1
+  shift
+  case $sub in
+    start) cmd_dispatch_start "$@" ;;
+    prompt) cmd_dispatch_prompt "$@" ;;
+    *) usage_error "unknown dispatch subcommand: $sub (expected start or prompt)" ;;
+  esac
+}
 cmd_version() {
   printf 'hod %s\n' "$HOD_VERSION"
 }
@@ -1362,6 +3073,9 @@ main() {
       ;;
     settings)
       cmd_settings "$@"
+      ;;
+    dispatch)
+      cmd_dispatch "$@"
       ;;
     ui)
       cmd_ui "$@"

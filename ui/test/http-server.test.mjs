@@ -52,6 +52,13 @@ function rawRequest(server, path, headers = {}) {
   });
 }
 
+async function waitFor(condition, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test('startHodUi preserves a class controller receiver over real loopback HTTP', async () => {
   const agents = Array.from({ length: 5 }, (_, index) => ({ paneId: `pane-${index + 1}` }));
   const runtimeStore = { getSnapshot: () => ({ agents }), selectPane() {} };
@@ -134,6 +141,6 @@ test('static GET/HEAD and SSE handshake/cleanup work over real loopback HTTP', a
   const eventResponse = await fetch(`http://127.0.0.1:${server.port}/api/events`, { headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } });
   assert.equal(eventResponse.status, 200); assert.equal(hub.clientCount, 1);
   await eventResponse.body.cancel();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor(() => hub.clientCount === 0);
   assert.equal(hub.clientCount, 0);
 });

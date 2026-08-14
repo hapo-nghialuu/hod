@@ -42,77 +42,156 @@ If either environment value is absent, stop and tell the user to launch the cont
 
 Installed leaf help is the only command authority. Run `herdr agent --help` and `herdr pane --help`, then the exact leaf (`herdr agent start --help`, …) before first use of any mutating form. Never run bare `herdr` for discovery, probe a mutating leaf by omitting arguments, or infer syntax from a version number. Use the modern family only when leaf help confirms it; if help instead matches the legacy forms exactly, read [Legacy Herdr 0.7.1](references/legacy-herdr-0.7.1.md) before acting. If neither family matches, fail closed and show the capability difference. Do not mix command families.
 
-Use explicit pane IDs or unique live agent names, parsed from JSON with `jq -e` — never predicted from examples, focus, pane order, or sidebar position. `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` identify the calling context; IDs are opaque, stable, and never reused. Prefer `--current` only for the calling pane and `--no-focus` for background work.
+Use explicit pane IDs or unique live agent names, parsed from JSON with `jq -e` — never predicted from examples, focus, pane order, or sidebar position. `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` identify the calling context; IDs are opaque, stable, and never reused. Dispatch passes the explicit controller pane ID immediately after `pane split`, then uses `--direction`, `--cwd`, and `--no-focus` for background work.
 
-## HOD UI topology metadata
+## HOD UI topology and guarded dispatch
 
-The HOD UI topology is display-only and best-effort. Before the first report,
-inspect the exact `herdr pane report-metadata --help` leaf and use this path
-only when it exposes `--source`, `--token`, and `--ttl-ms`. If an older Herdr
-does not expose that leaf, record `HOD topology metadata unavailable; UI
-topology may be missing` and continue the main orchestration unchanged. A
-metadata error never blocks split, start, prompt, redirect, wait, or harvest.
+For a child that must belong to the HOD UI topology, use the guarded
+`hod dispatch` lifecycle. Raw `pane split`, `agent start`, and `agent prompt`
+remain valid for deliberately untracked work; they may leave a child UNMAPPED
+and carry no HOD lifecycle guarantees. Never mix raw mutations with an active
+HOD dispatch for the same pane.
 
-For supported Herdr, report the controller pane and every child pane with
-`--source hod` and a finite 24-hour TTL (`86400000` ms). This keeps topology
-visible for long-running agents while remaining within Herdr 0.8's finite-TTL
-limit:
-
-Herdr 0.8 help can render options before `PANE_ID`; follow the installed
-parser and place the pane ID immediately after `report-metadata` as shown.
-This recipe correction does not change the public `hod` CLI.
+Start a child from a direct-user prompt with a bounded task/run label and the
+native agent arguments after `--`:
 
 ```bash
-metadata_args=(
-  herdr pane report-metadata "$pane_id"
-  --source hod
-  --ttl-ms 86400000
-  --token "hod_role=$role"
-  --token "hod_task=$task_label"
-  --token "hod_run=$run_id"
-)
-if [[ -n "$parent_pane_id" ]]; then
-  metadata_args+=(--token "hod_parent=$parent_pane_id")
-  metadata_args+=(--token "hod_relation=$relation")
-fi
-if ! "${metadata_args[@]}"; then
-  printf '%s\n' 'HOD topology metadata report failed; UI topology may be stale.' >&2
-fi
+printf '%s\n' "$DIRECT_USER_PROMPT" | hod dispatch start \
+  --name worker-1 \
+  --role worker --task task-slug --run run-id --kind claude \
+  --cwd "$PWD" --direction right --timeout 120000 -- \
+  --settings .claude/settings.impl.json
 ```
 
-Only these token names are allowed: `hod_role`, `hod_parent`,
-`hod_relation`, `hod_task`, and `hod_run`. `hod_role` is one of `controller`,
-`worker`, `advisor`, `reviewer`, or `tester`; `hod_relation` is one of
-`delegate`, `consult`, or `verify`. The root controller omits `hod_parent` and
-`hod_relation`; a child always includes both. A controller that is itself a
-child may include them only when its direct coordinator pane ID is known.
+An advisor start must carry an explicit canonical selection and matching native
+model:
 
-`hod_parent` must be the real pane ID of the direct coordinator, captured from
-the current `HERDR_PANE_ID` or a parsed Herdr result. Never derive it from an
-agent name, pane order, tab title, or focus. Map a normal worker to
-`worker`/`delegate`, an advisor to `advisor`/`consult`, and a reviewer or tester
-to its matching role/`verify`.
+```bash
+printf '%s\n' "$DIRECT_USER_PROMPT" | hod dispatch start \
+  --name advisor-1 --role advisor --task task-slug --run run-id --kind claude \
+  --cwd "$PWD" --direction right --timeout 120000 \
+  --advisor-choice fable --advisor-model fable -- --model fable
+```
 
-`hod_task` is a short, sanitized label chosen independently of prompt text,
-transcripts, pane output, secrets, tokens, or credentials: keep a slug of at
-most 48 characters matching `[a-z0-9._-]`, replace unsafe input, and use
-`task` when in doubt.
-`hod_run` is a short non-secret identifier stable for this orchestration run.
+Redirect an existing child through its real pane ID:
+
+```bash
+printf '%s\n' "$DIRECT_USER_PROMPT" | hod dispatch prompt \
+  --pane "$child_pane" --kind claude \
+  --task redirect-slug --run run-id --timeout 120000
+```
+
+`hod dispatch start` requires a unique `--name`, `HERDR_ENV=1`, a real
+`HERDR_PANE_ID`, and non-empty prompt stdin. The name is forwarded byte-for-byte
+to `agent start`; it has no role semantics, so multiple workers may share one
+role when their names are unique. It validates role (`worker`, `advisor`, `reviewer`,
+or `tester`), bounded safe task/run identifiers, kind, existing absolute cwd,
+direction, and timeout. It probes the exact Herdr 0.8 leaves before mutation:
+`agent start`, `agent prompt` with `--until`, `agent get`, `agent read`, `pane get`, `pane
+report-metadata`, and `pane split`. It reads the controller pane first: an
+untagged pane may bootstrap, an existing controller must already carry the
+requested `hod_run`, and child, partial, or invalid HOD tokens fail before any
+report, split, start, or prompt. It reports controller metadata and reads it
+back with `pane get`, then invokes `pane split "$pane_id" --direction
+"$direction" --cwd "$cwd" --no-focus` for the explicit controller pane with
+no `--current`, parses `.result.pane.pane_id`,
+requires the child to share the controller workspace, derives the relation,
+reports the child, and reads back the exact five tokens before starting it.
+The four mappings are worker/delegate, advisor/consult, reviewer/verify, and
+tester/verify. Native arguments are forwarded only after `--`. Advisor starts
+require `--advisor-choice fable|gpt-5.6-sol|opus` and `--advisor-model` with
+the same value, plus exactly one matching native `-m` or `--model`; both flags
+are rejected for non-advisor roles. `fable` and `opus` require `--kind claude`;
+`gpt-5.6-sol` requires `--kind codex`. The receipt records the choice and
+`requested_model` with `runtime_model_verified=false`; Herdr does not expose a
+runtime model field, so requested configuration is never claimed as observed.
+A bounded retry
+of at most 10 attempts, with 100ms between attempts, is allowed only when the
+JSON error has exactly `.error.code == "agent_pane_busy"`; a matching message
+alone never retries. After start, the child is refreshed and read back; only
+then is the prompt submitted with `--wait` and repeated `--until` values for
+`working`, `blocked`, `done`, `idle`, and `unknown`, returning after an observed
+state change rather than waiting for settlement. The installed prompt
+capability must advertise all five states. Start and prompt success require the
+strict Herdr 0.8 response type and the exact name, pane, agent kind, workspace,
+non-empty terminal identity, and boolean `interactive_ready`; `agent_status`
+must be `idle`, `working`,
+`blocked`, `done`, or `unknown`, and `state_change_seq` must be a non-negative
+safe integer. After start, `agent get` must read back the same identity with
+readiness true and a non-working state before the single prompt. Some agents,
+including Codex, expose the agent-session only after the first prompt. The
+launch therefore binds an unchanged terminal and sequence and accepts the exact
+first delivery response without inventing a session. For Codex, HOD also waits
+until the detection surface contains the actual Codex UI and prompt marker, so
+an OSC-title false positive cannot consume the prompt during launcher startup.
+The lifecycle prompt targets the unique agent name; the response must still
+bind back to the expected pane. A sessionless first receipt is accepted only in
+`working` or `blocked`, never as an idle/done false success. Redirect requires a later
+authoritative read with a non-empty, unchanged session before delivery. Prompt
+readback must keep the bound identity and advance the sequence. Any capability,
+report, parse, workspace, readback, start, or prompt failure exits nonzero, and
+no prompt is sent before verified metadata. Only exact `agent_pane_busy` start
+errors retry; stalled prompts and ambiguous transport do not. A NUL byte in
+prompt stdin is rejected without truncation, and prompts above 131072 bytes are
+rejected before mutation. Controller workspace, terminal, kind, and session
+must remain exact across mutation, and its pane revision must not regress.
+`--timeout` is one wall-clock deadline through
+capability probes, locking, metadata, lifecycle calls, and delivery. Failure
+cleanup then has its own hard three-second cap so rollback cannot hang the
+caller. A verified failure before start or delivery restores staged metadata
+when Herdr accepts the rollback; an ambiguous start or prompt attempt is never retried or rolled back
+as though delivery were known not to have happened. On success, start prints one
+machine-readable JSON receipt with `pane_id`, `name`,
+`role`, `relation`, `task`, and `run`.
+
+`hod dispatch prompt` requires a child pane ID, expected `--kind`, task/run labels, and prompt
+stdin. It reads the current child role, parent, relation, and run from
+authoritative tokens, rejects advisor, pane-working, authoritative-agent-working,
+or `interactive_ready != true` before any `report-metadata` mutation, requires
+the parent to equal the current `HERDR_PANE_ID`, validates the requested run and
+role/relation mapping, then refreshes and reads back controller and child
+metadata before the one prompt attempt. Both agent reads must keep the exact
+name, kind, terminal, session, workspace, and state sequence. It cannot
+reparent a pane or accept a
+free-form relation. Readback uses `pane get`, never `api snapshot`.
+
+Start and redirect are serialized by an atomic per-controller lock. HOD never
+steals a stale lock. A freshly split pane is closed only when its authoritative
+split receipt matched the controller workspace and a failure happens before any
+agent-start attempt. Cleanup first re-reads the exact pane, workspace, canonical
+cwd, terminal, and empty agent/session identity; a change visible at that read
+makes HOD fail closed and leave the pane open. Herdr 0.8 has no owner-CAS for
+the following close or metadata write, so an outside mutation in that final
+interval remains a race. Never mix raw lifecycle operations with an active HOD
+dispatch. HOD never intentionally closes an unproven pane or any pane after an
+agent-start attempt.
+
+The Herdr 0.8 prompt API does not expose a session-CAS argument. Therefore all
+coordinator lifecycle operations must use this serialized HOD path; never run a
+raw external stop/start/prompt against the same child concurrently. HOD targets
+the unique name and validates the returned session/terminal/pane, but cannot
+unsend input if an outside actor replaces the process in the final API interval.
+If split transport fails before an authoritative pane receipt, HOD never starts
+an agent and leaves any unproven empty pane for explicit inspection instead of
+guessing and closing by order or cwd.
+
+The dispatch implementation accepts `HOD_HERDR_BIN` only as a test-only
+override and defaults to `herdr`. An old Herdr without the required exact
+leaf capability fails before split; there is no fallback. The
+metadata TTL is finite and exactly `86400000` ms, with `--source hod`.
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`,
+`hod_task`, and `hod_run`. The root controller has the role/task/run tokens;
+each child has all five, including its real direct parent pane ID. Task labels
+are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs
+are safe non-secret identifiers.
+
 Topology roles are not profile names: an `impl` or `implementer` profile must
-still report `hod_role=worker`, never its profile label. Allocate `run_id` once
-per orchestration, refresh a reused controller pane before reporting children,
-and pass that exact same value to the controller and every child.
-Do not put any other data in metadata, including prompt fragments or worker
-claims.
-
-Attach metadata at the existing lifecycle boundaries: report the controller
-before dispatch; after `pane split`, parse and report the returned child pane
-ID before `agent start`; report that same pane again after a successful start;
-on redirect, resolve the target's actual pane ID and refresh its same parent,
-role, relation, run, and new short task label; on harvest, refresh the settled
-pane using its actual ID before reading evidence. Each report restarts the
-24-hour TTL. Do not reparent a pane on a redirect or harvest, and let the
-finite TTL expire naturally.
+report `hod_role=worker`. Allocate `run_id` once per orchestration and pass
+the exact same value to the controller and every child. When a controller pane
+is reused, refresh it before reporting or starting any child. Advisor routing
+is opt-in only: reserve `advisor`/`consult` for an explicit adaptive
+`CONSULT`, require exactly one user-selected `Fable`, `GPT-5.6 Sol`, or
+`Opus` before split, and use `HOLD + ASK_USER` if absent or unavailable.
 
 ## Workflow
 
@@ -132,7 +211,7 @@ coordinator or for coordinator plus advisor behavior. Without that opt-in, the
 workflow above and the existing small-task/direct-user behavior are unchanged.
 
 When active, read [Adaptive Coordinator with Tripwire Escalation](references/coordinator-advisor.md)
-as the normative hod `0.1.15` reference. It defines three base modes —
+as the normative hod `0.1.16` reference. It defines three base modes —
 `DIRECT`, `SINGLE`, and `ORCHESTRATE` — plus `CONSULT` and `ASK_USER` overlays.
 Plain `DIRECT` stays ceremony-free. A `DIRECT` route may carry an independently
 triggered overlay; it then records R0 and the overlay artifact but still creates
@@ -180,12 +259,19 @@ For exact three-role promises, CLI flags, and enforcement gaps, see [Role Bounda
 
 - A spoken model name is a label, not an ID. Resolve the exact string from the installed CLI before starting. If the CLI rejects it, report its error verbatim and ask — never substitute, downgrade, or retry with a guess. When no model is named, omit the flag and let the CLI use its configured default.
 - A project profile (`.claude/settings.<role>.json`) only takes effect when passed at start. A worker started bare silently discards the user's configuration — treat that as a defect. Map each role to its matching profile; never invent, substitute, or author one. A boundary role (read-only reviewer, coordinator-only controller) started without a profile is enforced by wording alone — say so in the report.
-- Refuse contradictions instead of passing them: `--dangerously-skip-permissions` disables every deny rule loaded through `--settings`, and `--continue`/`--resume` on a reviewer defeats its independence. An enforced boundary is the same contract as a written one — never route around a denied tool by shelling out or handing the action to another agent. The sole exception is adaptive checkpoint metadata: when the normative reference requires it, only the active coordinator may use a local shell to write the one exact external checkpoint path. That narrow control-plane write never permits task-file, repository, or worker-artifact writes, and its path restriction is wording-level plus evidence-checked where the harness leaves shell access available.
+- Refuse contradictions instead of passing them: native bypass forms such as `--dangerously-skip-permissions` or `--permission-mode bypassPermissions` disable deny rules loaded through `--settings`, and resuming, forking, teleporting, or attaching an existing session for a reviewer defeats its independence. `hod dispatch start` rejects direct bypass forms and values in native argv for every role before mutation. Advisor, reviewer, and tester starts use a positive native-argument allowlist: no root subcommands, native cwd/system-prompt changes, inline settings/tool grants, non-read-only sandbox overrides, or arbitrary config/profile/approval overrides. Use file-based Claude settings, canonical Codex `-s read-only -c features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules. HOD does not inspect referenced settings or ambient CLI configuration; pass only inputs the user trusts. An enforced boundary is the same contract as a written one — never route around a denied tool by shelling out or handing the action to another agent. The sole exception is adaptive checkpoint metadata: when the normative reference requires it, only the active coordinator may use a local shell to write the one exact external checkpoint path. That narrow control-plane write never permits task-file, repository, or worker-artifact writes, and its path restriction is wording-level plus evidence-checked where the harness leaves shell access available.
 - Continue a live agent only when the task directly extends its work with the same role and file ownership. Start fresh for review or audit, for a changed role or ownership, or when information isolation matters — and never resume a transcript for a review step: a resumed reviewer looks independent and is not.
 
 ## Lifecycle and evidence
 
-`agent start` needs an existing pane (`pane split --current --no-focus`) and always begins an empty session. `agent prompt <target> <text> --wait` submits atomically — bracketed paste plus Enter — and confirms delivery through an observed state change. Do not rebuild submission from raw text and key events, and do not prompt a `working` agent except for an urgent correction: Herdr does not correlate turns, so the reply may answer the wrong request.
+`hod dispatch start` owns the split, metadata, and `agent start` sequence for a
+topology-tracked child; `hod dispatch prompt` owns its guarded `agent prompt
+<unique-agent-name> <text> --wait` redirect and observed state change. A
+deliberately untracked raw child remains outside this contract. For the same
+HOD-managed pane, do not mix raw split/start/prompt mutations, rebuild
+submission from raw text and key events, or prompt a `working` agent except for
+an urgent correction: Herdr does not correlate turns, so the reply may answer
+the wrong request.
 
 On a settled wait, act on the state, not the screen:
 

@@ -1,6 +1,6 @@
 # Adaptive Coordinator with Tripwire Escalation
 
-This is the normative reference for hod `0.1.15` adaptive mode. It is
+This is the normative reference for hod `0.1.16` adaptive mode. It is
 opt-in: activate it only when the user asks for an adaptive coordinator or for
 coordinator plus advisor behavior. Without that request, follow the existing
 `SKILL.md` workflow unchanged.
@@ -9,7 +9,7 @@ The protocol has three base modes — `DIRECT`, `SINGLE`, and `ORCHESTRATE` —
 with `CONSULT` and `ASK_USER` as overlays. It governs routing, evidence,
 tripwires, advisor review, handoff, and permission handling. It does not add a
 runtime service or a new CLI surface. This release does not add public ledger
-or evidence commands; those remain deferred beyond `0.1.15`.
+or evidence commands; those remain deferred beyond `0.1.16`.
 
 ## Invariants
 
@@ -296,7 +296,7 @@ E0 rules:
    restarts checks, E0, and G2 on the new state.
 10. A revision or evidence change after the final E0 makes the receipt stale and
    requires a new receipt before acceptance or integration.
-11. `0.1.15` uses bounded Git, Herdr, and test commands; it adds no evidence
+11. `0.1.16` uses bounded Git, Herdr, and test commands; it adds no evidence
    validator command.
 
 ### Conditional advisor gates
@@ -629,8 +629,12 @@ Herdr command after handoff. The safe sequence is:
    tool/command pattern when the current user message or a user-authored
    standing policy supplies the matching authority reference. Do not edit a
    shared profile to avoid a prompt.
-3. Never allow generic `Bash` and never use
-   `--dangerously-skip-permissions`.
+3. Never allow generic `Bash` and never use a native permission bypass flag or
+   mode such as `--dangerously-skip-permissions` or `--permission-mode
+   bypassPermissions`. Guarded dispatch rejects direct bypass forms and values
+   in native argv, but does not inspect referenced settings, profile, or config
+   files, custom sandbox profiles, or ambient CLI configuration; pass only
+   inputs the user trusts.
 4. For a residual prompt, read the exact dialog and pane context.
 5. Approve only with an exact authority reference and confirmation that the
    option is a one-time approval for the exact action. Do not rely on a
