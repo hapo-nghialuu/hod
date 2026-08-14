@@ -155,6 +155,63 @@ Do not stop or update a running Herdr session automatically. Stopping a server
 can terminate processes in its panes. Choose a maintenance window and follow
 the official Herdr update documentation.
 
+## Guarded dispatch fails before creating a child
+
+Use the HOD dispatch leaves for child creation and redirection:
+
+```bash
+hod dispatch start --help
+hod dispatch prompt --help
+```
+
+`hod dispatch start` requires a direct-user prompt on stdin plus the exact
+`--name`, `--role`, `--task`, `--run`, `--kind`, absolute `--cwd`, direction,
+timeout, and `-- [native args...]` contract. It binds and reads back the
+controller and child metadata, starts only after the read-back, then refreshes
+and reads back before prompting. Success is a JSON receipt with `pane_id`,
+`name`, `role`, `relation`, `task`, and `run`; relations are
+`worker=delegate`, `advisor=consult`, and `reviewer=tester=verify`.
+`hod dispatch prompt` also requires the child's expected `--kind`; it refuses
+working/not-ready agents and any name, kind, workspace, terminal, session, or
+sequence drift before delivery. A newly started Codex pane may not expose its
+session until after the first prompt receipt; HOD validates that first delivery
+by launch terminal and sequence, waits for the real Codex prompt surface, sends
+by unique agent name, and accepts a sessionless receipt only in `working` or
+`blocked`; it then requires a non-empty session for every
+redirect. Dispatches for the same coordinator are serialized.
+If the command reports an active dispatch lock, inspect the existing operation;
+HOD deliberately never steals a stale lock. If the owning process was killed,
+first verify that no `hod dispatch` for that coordinator is running, then remove
+only that controller's lock directory under `$HOD_HOME/dispatch-locks/`; never
+delete the whole lock root while another dispatch may be active.
+
+Raw `herdr pane split`, `herdr agent start`, and `herdr agent prompt` are not a
+topology-tracked HOD child path: they can recreate `UNMAPPED`, but remain valid
+for deliberately untracked work. If topology tracking is required and an old
+Herdr lacks the exact capability, dispatch fails before split and does not fall
+back to raw commands. Never mix raw mutations with an active HOD dispatch on
+the same pane. After updating HOD, restart or reload any long-lived controller;
+HOD cannot retrofit instructions already loaded by a running session.
+
+Herdr 0.8 has no session-CAS field on `agent prompt`. Do not race a managed
+child with raw external stop/start/prompt calls; HOD serializes its own calls,
+targets the unique agent name, and validates the returned identity, but cannot
+unsend input after an outside process replacement. If a split loses its
+authoritative response, HOD does not start an agent and may leave an empty pane
+for manual inspection rather than guessing its identity.
+
+If a verified pre-start bind fails after a split, HOD closes only that newly
+split child after re-reading the exact pane/workspace/cwd/terminal and confirming
+that no agent/session has claimed it. A claimed or changed pane is left open.
+It never guesses a pane from names or ordering, and never closes a pane after an
+agent-start attempt. Prompt stdin above 131072 bytes fails before mutation.
+`--timeout` bounds the guarded path through delivery; failure cleanup has a
+separate hard three-second cap.
+
+If the requested role is `advisor`, stop until you have explicitly chosen
+exactly one of `Fable`, `GPT-5.6 Sol`, or `Opus`. Never default or substitute an
+unavailable advisor; hold and ask instead.
+
 ## Adapter already exists and is not a symlink
 
 The installer refuses to replace existing content. Inspect it:
@@ -179,8 +236,10 @@ command -v claude
 command -v grok
 ```
 
-Do not silently substitute another worker kind when the user named one. Install
-the requested CLI or ask the user whether an available kind is acceptable.
+`herdr agent start --help` is inspection only here; HOD workflow launches go
+through `hod dispatch start --kind <kind>`. Do not silently substitute another
+worker kind when the user named one. Install the requested CLI or ask the user
+whether an available kind is acceptable.
 
 ## Agent remains `working`
 

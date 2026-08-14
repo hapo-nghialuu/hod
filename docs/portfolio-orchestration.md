@@ -17,6 +17,13 @@ runs its own workers. Workers never start agents, and delegation never goes
 deeper than two levels. The operational contract lives in
 [Portfolio hierarchy and tiers](../references/portfolio-hierarchy.md).
 
+Every new HOD child in this hierarchy uses guarded `hod dispatch start`, and
+every follow-up uses `hod dispatch prompt`; the CLI only enforces deterministic
+topology mechanics. The controller still owns planning, routing, and
+authority. The dispatch relation mapping is `worker=delegate`,
+`advisor=consult`, and `reviewer=tester=verify`; raw Herdr split/start/prompt is
+unsupported because it can recreate `UNMAPPED`.
+
 ## When to use it
 
 Use portfolio mode when several projects need concurrent attention and you
@@ -103,6 +110,9 @@ anywhere.
 - Portfolio mode never relaxes the safety model; it adds boundaries on top of
   it. Destructive, published, or credentialed actions still require explicit
   authority.
+- An advisor is available only after your explicit choice of `Fable`, `GPT-5.6
+  Sol`, or `Opus`; if unavailable, hold and ask rather than defaulting or
+  substituting.
 - Content isolation is enforced between projects: a controller sees only its
   own project's policy, files, and task context.
 - If the orchestrator dies mid-flight, workers and controllers keep running
@@ -111,7 +121,10 @@ anywhere.
 
 ## Troubleshooting
 
-Start with [Troubleshooting](troubleshooting.md) for adapter, preflight, and
-capability issues; they apply unchanged. For hierarchy-specific problems,
-inspect `~/.herdr-orc/portfolio.md` and the per-project ledgers first — they
-are plain Markdown and always reflect the orchestrator's last known state.
+Start with [Troubleshooting](troubleshooting.md) for adapter, preflight,
+dispatch, and capability issues; they apply unchanged. After updating HOD,
+restart or reload long-lived portfolio and project-controller sessions; HOD
+cannot retrofit their already loaded instructions. For hierarchy-specific
+problems, inspect `~/.herdr-orc/portfolio.md` and the per-project ledgers first
+— they are plain Markdown and always reflect the orchestrator's last known
+state.

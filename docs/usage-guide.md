@@ -1,7 +1,9 @@
 # Usage Guide
 
-This guide focuses on how to request and steer work. The controller owns the
-Herdr commands, worker lifecycle, integration, and evidence collection.
+This guide focuses on how to request and steer work. The controller owns
+intent, planning, routing, authority, worker lifecycle, integration, and
+evidence collection; for orchestration, the `hod` CLI owns only deterministic
+dispatch guards.
 
 ## Request template
 
@@ -28,6 +30,84 @@ Verification:
 
 You do not need to specify every worker. Explicit routing is useful only when a
 particular CLI, model, or independent perspective is a real requirement.
+
+## Guarded topology dispatch
+
+In the HOD workflow, create a child only through the public guarded command.
+`hod dispatch start` requires a non-empty direct-user prompt on stdin and this
+exact flag shape:
+
+```text
+hod dispatch start --name <unique> --role worker|advisor|reviewer|tester \
+  --task <safe-slug> --run <safe-id> --kind <kind> --cwd <absolute> \
+  --direction right|down --timeout <ms> \
+  [--advisor-choice fable|gpt-5.6-sol|opus --advisor-model <same>] -- [native args...]
+```
+
+Example:
+
+```bash
+project_cwd="$(pwd -P)"
+printf '%s\n' 'Implement the health endpoint and return changed files and test results.' |
+  hod dispatch start --name health-worker --role worker \
+    --task health-endpoint --run run-demo-001 --kind claude \
+    --cwd "$project_cwd" --direction right --timeout 120000 -- \
+    --settings .claude/settings.impl.json
+```
+
+The guard binds and reads back the controller, splits, binds and reads back the
+child, starts it, refreshes and reads it back, and only then submits the
+prompt. Success prints a JSON receipt containing `pane_id`, `name`, `role`,
+`relation`, `task`, and `run`. Relations map `worker=delegate`,
+`advisor=consult`, and `reviewer=tester=verify`.
+Advisor start additionally requires explicit matching
+`--advisor-choice`/`--advisor-model` values and exactly one matching native
+`-m` or `--model`; `fable`/`opus` require `--kind claude`, while
+`gpt-5.6-sol` requires `--kind codex`; the receipt records
+`requested_model` and `runtime_model_verified=false`, not an observed runtime
+model. Without a user choice, use `HOLD + ASK_USER`, not a default. Herdr 0.8 start/get/prompt success requires
+the exact identity (including launch terminal), boolean readiness, an allowed
+`agent_status`, and an advancing safe `state_change_seq`; NUL-containing stdin
+and prompts above 131072 bytes are rejected before mutation. `--timeout` is an
+overall wall-clock deadline through probes, locking, metadata, lifecycle calls,
+and delivery; failure cleanup has a separate hard three-second cap. When start/get has not exposed a session yet, the first delivery
+is bound by terminal and sequence. Codex additionally waits for its real prompt
+surface, then delivery targets the unique agent name; a sessionless receipt is
+valid only in `working` or `blocked`. Redirects require a later authoritative
+non-empty, exact session.
+Start bootstraps only an untagged controller pane; an existing controller must
+match the requested `hod_run`, and child/partial/invalid HOD tokens fail before
+report, split, start, or prompt. Prompt rejects advisor, pane-working,
+authoritative-agent-working, and not-ready children before metadata reporting.
+
+Redirect an existing child with a direct-user prompt on stdin:
+
+```bash
+printf '%s\n' 'Continue the task and report fresh verification.' |
+  hod dispatch prompt --pane "$child_pane_id" --task health-follow-up \
+    --kind claude --run run-demo-001 --timeout 120000
+```
+
+`hod dispatch prompt` refreshes and validates before redirecting, including the
+authoritative agent-get working-state check. Advisor redirect is rejected
+because every consult is a fresh start. Raw `herdr pane split`, `herdr agent
+start`, and `herdr agent prompt` remain valid for deliberately untracked work;
+those panes may appear `UNMAPPED` and carry no HOD lifecycle guarantee. Never
+mix raw mutations with an active HOD dispatch on the same pane. An old Herdr missing the
+exact capability fails before split; there is no fallback. After updating HOD,
+restart or reload long-lived controller sessions so they load the new
+instructions — HOD cannot retrofit instructions already loaded in a running
+session.
+
+Dispatches for one coordinator are serialized. Redirect binds the explicitly
+expected kind, agent name, workspace, terminal identity, agent-session
+identity, and state sequence across its authoritative reads. A verified failure
+before any agent-start attempt closes only the freshly split child after an
+exact cleanup readback of pane/workspace/cwd/terminal and empty agent/session.
+If another actor has claimed or changed it, HOD leaves it open and fails closed.
+Pre-delivery failures restore staged metadata when possible; ambiguous lifecycle
+attempts are never auto-retried. HOD never closes an unproven or already-started
+pane.
 
 ## Adaptive coordinator (opt-in)
 
@@ -64,7 +144,9 @@ do not commit or push, and return the fresh E0 receipt plus test results.
 
 The coordinator sends one task packet. A repository change always receives E0;
 an advisor is added only when you explicitly request one or a qualifying
-technical trigger fires.
+technical trigger fires, and only after you explicitly choose exactly one of
+`Fable`, `GPT-5.6 Sol`, or `Opus`. If it is unavailable, the coordinator holds
+and asks instead of defaulting or substituting.
 
 ### `ORCHESTRATE`
 
@@ -99,7 +181,7 @@ GPT-5.6 Sol; do not substitute if it is unavailable.
 
 The other allowed advisor choices are `Fable` and `Opus`. Name exactly one
 selected model in a real request; if it is unavailable, the coordinator holds
-and asks you instead of substituting.
+and asks you instead of defaulting or substituting.
 
 Use `ASK_USER` for a permission, cost, credential, publication, external, or
 irreversible decision:
@@ -219,10 +301,19 @@ its own flags — Codex separates the model from reasoning effort, while Grok an
 Claude take a single model flag:
 
 ```bash
-herdr agent start planner --kind codex --pane "$p1" \
-  -- -m <codex-model-id> -c model_reasoning_effort=max
-herdr agent start impl --kind grok --pane "$p2" -- -m <grok-model-id>
-herdr agent start reviewer --kind claude --pane "$p3" -- --model <claude-model>
+printf '%s\n' 'Implement the task and return fresh verification.' |
+  hod dispatch start --name codex-worker --role worker --task codex-task \
+    --run run-demo-001 --kind codex --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- \
+    -m <codex-model-id> -c model_reasoning_effort=max
+printf '%s\n' 'Run the requested tests and report their results.' |
+  hod dispatch start --name grok-tester --role tester --task grok-tests \
+    --run run-demo-001 --kind grok --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- -m <grok-model-id>
+printf '%s\n' 'Review the current diff read-only and return findings.' |
+  hod dispatch start --name claude-reviewer --role reviewer --task final-review \
+    --run run-demo-001 --kind claude --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- --model <claude-model>
 ```
 
 Name the exact model ID your CLI accepts, not a spoken shorthand. A phrase like
@@ -272,8 +363,9 @@ of your own shell. Wait for a per-run sentinel, read the output back, and
 report the real exit status — keep your own context for coordination.
 ```
 
-The controller should redirect an existing worker with new evidence rather than
-restart it or duplicate the original prompt.
+The controller should redirect an existing worker with `hod dispatch prompt`
+and new evidence rather than restart it or duplicate the original prompt; the
+guard refreshes and validates the topology before sending it.
 
 ## Local HOD UI console
 

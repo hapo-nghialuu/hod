@@ -144,10 +144,11 @@ mất dấu ai đã sửa gì.
 | Phần | Là gì | Làm gì |
 | --- | --- | --- |
 | **Skill** | Bản contract Markdown (`SKILL.md` + `references/`) | Bộ não: luật ủy quyền, kỷ luật vòng đời, kiểm chứng, ranh giới an toàn. LLM đọc và thi hành bằng phán đoán |
-| **CLI `hod`** | Một binary bash duy nhất | Đôi tay: cài skill vào bất kỳ đâu, chẩn đoán setup, quản lý profile quyền theo vai. Chứa **zero** logic điều phối |
+| **CLI `hod`** | Một binary bash duy nhất | Đôi tay: cài skill ở bất kỳ đâu, chẩn đoán setup, quản lý profile quyền theo vai, và trong orchestration chỉ áp dụng guard topology mang tính máy móc. Không bao giờ tự quyết định planning, routing, hay authority |
 
-Việc tách đôi này là cố ý: *code làm việc máy móc, LLM làm việc phán đoán* —
-không bên nào giả vờ làm việc của bên kia.
+Việc tách đôi này là cố ý: *skill/controller quyết định planning, routing, và
+authority; CLI chỉ làm cơ chế dispatch máy móc, xác định được* — không bên nào
+giả vờ làm việc của bên kia.
 
 ## Cách hoạt động
 
@@ -162,7 +163,9 @@ không bên nào giả vờ làm việc của bên kia.
 
 2. **Controller chạy preflight** — từ chối hành động nếu không ở trong pane
    do Herdr quản lý (`HERDR_ENV=1`), server không tương thích, hoặc bộ lệnh
-   cài đặt không khớp `--help`. Mọi thứ mơ hồ → dừng lại (fail-closed).
+   cài đặt không khớp `--help`. Với child, `hod dispatch` bind và đọc lại
+   controller, split, bind và đọc lại child, start, refresh và đọc lại, rồi mới
+   gửi prompt direct-user. Mọi thứ mơ hồ → dừng lại (fail-closed).
 
 3. **Worker được nói chuyện như thể chính bạn viết prompt.** Tin nhắn Herdr
    không có trường người gửi, nên từ ngữ là thứ duy nhất có thể làm lộ cơ chế
@@ -198,9 +201,11 @@ coordinator kèm advisor. Adaptive mode chọn route nhỏ nhất phù hợp v�
 mode, consult mở một advisor độc lập trong session mới khi bạn yêu cầu tường
 minh hoặc khi một trigger kỹ thuật đủ điều kiện xảy ra; câu hỏi về authority,
 permission, chi phí, hay hành động hướng ra ngoài sẽ dừng để bạn quyết. Bạn
-chọn advisor trong `Fable`, `GPT-5.6 Sol`, hoặc `Opus` — advisor chỉ đánh giá,
-không phê duyệt. Mọi thay đổi repo vẫn có E0 evidence receipt máy móc trước
-acceptance, và mọi tripwire đều `HOLD` trước khi route lại.
+phải chọn rõ một advisor trong `Fable`, `GPT-5.6 Sol`, hoặc `Opus` trước khi
+dispatch — advisor chỉ đánh giá, không phê duyệt. Nếu advisor đã chọn không có,
+hãy hold và hỏi lại; không bao giờ default hay substitute. Mọi thay đổi repo
+vẫn có E0 evidence receipt máy móc trước acceptance, và mọi tripwire đều `HOLD`
+trước khi route lại.
 
 Xem [reference adaptive coordinator](references/coordinator-advisor.md) để đọc
 đủ protocol và [ví dụ sử dụng](docs/usage-guide.md).
@@ -217,13 +222,92 @@ Xem [reference adaptive coordinator](references/coordinator-advisor.md) để đ
 | `hod update` | Fast-forward skill; checkout đang pin sẽ nhảy tới tag mới nhất. Từ chối khi cây có sửa đổi |
 | `hod settings list` | Liệt kê profile Claude, cờ Codex tương đương + lệnh khởi động dán được ngay |
 | `hod settings install [--role <r>] [--force]` | Ghi profile theo vai vào `.claude/` của dự án |
+| `hod dispatch start --name <unique> --role <r> --task <slug> --run <id> --kind <kind> --cwd <absolute> --direction <right\|down> --timeout <ms> -- ...` | Start child có guard từ prompt direct-user qua stdin; trả JSON receipt |
+| `hod dispatch prompt --pane <id> --kind <kind> --task <slug> --run <id> --timeout <ms>` | Refresh và validate child trước khi redirect prompt direct-user qua stdin |
 | `hod ui [--project <path>] [--port <0-65535>] [--no-open]` | Mở console web HOD cục bộ (Node.js 20+) |
 | `hod uninstall [--purge]` | Chỉ xóa adapter trỏ về `~/.hod/skill` và cắt khối nhắc; không bao giờ đụng file lạ |
 
-Các kiểm tra Herdr của `hod` ngoài UI đều **chỉ đọc** (`herdr status`,
-`herdr integration status`). `hod` không bao giờ tự khởi động agent hay cài
-integration. UI cục bộ chỉ đọc runtime và chỉ đổi các setting đã công bố sau
-khi bạn xác nhận rõ ràng — quyền với session vẫn thuộc về bạn và controller.
+Các kiểm tra chẩn đoán Herdr vẫn **chỉ đọc** (`herdr status`,
+`herdr integration status`). `hod dispatch` là workflow HOD được hỗ trợ để
+start và prompt child; nó chỉ sở hữu topology guard mang tính máy móc. Planning,
+routing, và authority vẫn thuộc controller và bạn. `hod` không cài integration.
+UI cục bộ chỉ đổi các setting đã công bố sau khi bạn xác nhận rõ ràng — quyền
+với session vẫn thuộc về bạn và controller.
+
+## Guarded topology dispatch
+
+Với child cần xuất hiện trong topology HOD, dùng `hod dispatch start`; prompt
+direct-user không rỗng phải đi qua stdin. Dạng public là:
+
+```text
+hod dispatch start --name <unique> --role worker|advisor|reviewer|tester \
+  --task <safe-slug> --run <safe-id> --kind <kind> --cwd <absolute> \
+  --direction right|down --timeout <ms> \
+  [--advisor-choice fable|gpt-5.6-sol|opus --advisor-model <same>] -- [native args...]
+```
+
+Ví dụ:
+
+```bash
+project_cwd="$(pwd -P)"
+printf '%s\n' 'Implement health endpoint và trả về file đã đổi cùng kết quả test.' |
+  hod dispatch start --name health-worker --role worker \
+    --task health-endpoint --run run-demo-001 --kind claude \
+    --cwd "$project_cwd" --direction right --timeout 120000 -- \
+    --settings .claude/settings.impl.json
+```
+
+Khi thành công, stdout có JSON receipt gồm `pane_id`, `name`, `role`,
+`relation`, `task`, và `run`. Mapping relation máy móc là
+`worker=delegate`, `advisor=consult`, và `reviewer=tester=verify`.
+Advisor start bắt buộc có `--advisor-choice` canonical và
+`--advisor-model` trùng khớp, cùng đúng một native `-m` hoặc `--model` tương
+ứng; `fable`/`opus` bắt buộc `--kind claude`, còn `gpt-5.6-sol` bắt buộc
+`--kind codex`; receipt ghi lựa chọn, `requested_model`, và đánh dấu runtime
+model chưa được Herdr xác minh. Nếu user chưa chọn advisor, phải
+`HOLD + ASK_USER`. Start/get/prompt Herdr 0.8 thành công chỉ được công nhận khi
+name, pane, kind, workspace, terminal identity, readiness boolean, status hợp
+lệ và `state_change_seq` đúng; stdin có NUL bị reject, không truncate, còn
+prompt lớn hơn 131072 byte bị reject trước mutation. `--timeout` là một
+wall-clock deadline chung xuyên suốt capability probe, lock, metadata,
+lifecycle call và delivery; cleanup khi lỗi có hard cap riêng ba giây. Codex có
+Workspace, terminal, kind và session của controller phải giữ nguyên chính xác
+qua mutation; pane revision được phép tăng nhưng không được lùi. Codex có
+thể chỉ trả agent-session sau prompt đầu: start bind terminal cùng sequence
+không đổi, đợi đúng prompt surface của Codex và gửi theo unique agent name.
+Receipt lần đầu chưa có session chỉ hợp lệ ở `working` hoặc `blocked`. Mọi
+redirect sau đó bắt buộc authoritative read có session không rỗng, không đổi.
+Start đọc controller trước: pane chưa có HOD token mới được bootstrap, controller
+có sẵn phải có đúng `hod_run`, còn token child/partial/invalid bị reject trước
+report, split, start, prompt. Prompt reject advisor, pane đang working,
+agent authoritative đang working hoặc chưa ready trước mọi report metadata.
+
+Muốn redirect child đã có, cũng gửi prompt direct-user mới qua stdin:
+
+```bash
+printf '%s\n' 'Tiếp tục task và báo cáo kiểm chứng mới.' |
+  hod dispatch prompt --pane "$child_pane_id" --task health-follow-up \
+    --kind claude --run run-demo-001 --timeout 120000
+```
+
+`hod dispatch prompt` refresh và validate controller cùng child trước khi
+redirect, gồm cả agent-get authoritative để từ chối child đang `working`.
+Advisor redirect bị từ chối vì mỗi consult phải là một start mới. Raw `herdr
+pane split`, `herdr agent start`, và `herdr agent prompt` vẫn hợp lệ cho công
+việc chủ động không tracking; các pane đó có thể hiện `UNMAPPED` và nằm ngoài
+đảm bảo lifecycle của HOD. Không trộn raw mutation với HOD dispatch đang chạy
+trên cùng một pane.
+Herdr cũ thiếu đúng capability bắt buộc sẽ fail trước split, không có fallback.
+Sau khi update HOD, phải restart hoặc reload controller session chạy lâu để
+nạp instruction mới — HOD không thể retrofit instruction đã nạp trong session
+đang chạy.
+
+Các dispatch của cùng coordinator được serialize. Redirect bind expected kind,
+terminal identity và agent-session identity không đổi; lỗi bind pre-start chỉ
+đóng pane vừa split sau readback cleanup chính xác. Nếu tác nhân khác đã claim
+hoặc đổi pane, HOD để pane mở và fail-closed. Lỗi pre-delivery rollback metadata
+đã stage khi Herdr chấp nhận; lifecycle attempt mơ hồ không được auto-retry.
+HOD không đóng pane chưa chứng minh ownership hoặc đã start agent.
 
 ## Console UI cục bộ của HOD
 
@@ -339,12 +423,21 @@ worker mất `Bash` và không còn báo được là mình đang kẹt. Pane im
 controller thì chờ mãi. Đừng bao giờ để `dontAsk` trong profile theo vai.
 
 ```bash
-herdr agent start impl --kind claude --pane "$p" \
-  -- --continue --settings .claude/settings.impl.json
+printf '%s\n' 'Implement thay đổi được yêu cầu và trả về bằng chứng.' |
+  hod dispatch start --name impl-worker --role worker --task requested-change \
+    --run run-demo-001 --kind claude --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- \
+    --settings .claude/settings.impl.json
 
-herdr agent start reviewer --kind claude --pane "$p2" \
-  -- --settings .claude/settings.reviewer.json     # session mới, không bao giờ --continue
+printf '%s\n' 'Review diff hiện tại read-only và trả về findings kèm path-line.' |
+  hod dispatch start --name read-only-reviewer --role reviewer --task review-change \
+    --run run-demo-001 --kind claude --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- \
+    --settings .claude/settings.reviewer.json
 ```
+
+Đây là guarded dispatch mới; không truyền `--continue` hoặc `--resume` cho
+reviewer độc lập.
 
 Hai luật được chứng minh bằng test thật, không phải lý thuyết:
 
@@ -433,6 +526,8 @@ herdr-orchestrator/
 - Không cài, không đăng nhập, không trả tiền cho agent CLI hộ bạn.
 - Không cấp quyền mà bạn chưa từng cấp.
 - Không ép mọi task thành multi-agent — việc nhỏ vẫn một agent.
+- Không tự quyết định planning, routing, hay authority; các quyết định này vẫn
+  thuộc controller và bạn.
 - Không coi trạng thái `done` của agent là bằng chứng đúng đắn.
 - Không commit, merge, push, publish, hay xóa gì khi chưa có thẩm quyền từ bạn.
 
@@ -494,13 +589,14 @@ herdr integration status           # trạng thái agent có đáng tin không?
 
 Thoát ra bằng `ctrl+b` rồi `q`. Không có gì dừng chạy.
 
-**Tự tay khởi động worker** (bình thường controller làm hộ bạn)
+**Tự tay khởi động child** (bình thường controller làm hộ bạn)
 
 ```bash
-split=$(herdr pane split --current --direction right --cwd "$PWD" --no-focus)
-pane=$(printf '%s\n' "$split" | jq -er '.result.pane.pane_id')
-herdr agent start impl --kind claude --pane "$pane" \
-  -- --settings .claude/settings.impl.json
+printf '%s\n' 'Implement task được yêu cầu và trả về file đổi cùng các check.' |
+  hod dispatch start --name impl-worker --role worker --task task-slug \
+    --run run-demo-001 --kind claude --cwd "$(pwd -P)" \
+    --direction right --timeout 120000 -- \
+    --settings .claude/settings.impl.json
 ```
 
 </details>
