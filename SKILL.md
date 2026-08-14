@@ -7,6 +7,83 @@ description: "Orchestrate coding agents through Herdr as the user's authorized p
 
 Use Herdr as the transport and control plane. The current CLI remains the single accountable agent for planning, delegation, evidence, integration, and the final answer to the user. The controller may be Codex CLI, Claude Code CLI, or Grok Build CLI; do not make controller-specific assumptions.
 
+## Outcome kernel
+
+The coordinator owns the user's outcome, not just delegation mechanics. From
+a stated want, derive one observable `DONE_WHEN` and the current gaps against
+it, and keep dispatching workers, testers, or reviewers — never the
+controller's own hands — until every gap closes with fresh evidence. A
+worker's `done` state closes a task, not the outcome: while `DONE_WHEN` is
+still unevidenced, the next gap gets its own packet. `DIRECT`, `SINGLE`, and
+`ORCHESTRATE` are execution modes in service of that outcome, not completion
+goals in themselves — a clearly-directed task dispatches straight to a
+worker packet with no added ceremony.
+
+**Coordinator-only is the default, not a special mode.** Acting as the Herdr
+coordinator, the controller performs no task work — no implementing,
+building, testing, debugging, reviewing, or resolving conflicts itself,
+"quick fix" included. It reads: artifacts, diffs, and logs; it judges
+evidence; it coordinates; and, only once the user has granted authority for
+that exact change, it commits or pushes an already-verified, worker-authored
+diff. Committing or pushing worker output is not authoring it — the
+controller still never originates the diff, and never commits or pushes
+without a fresh authorization for that exact change.
+
+**Explicit opt-out outranks everything above.** If the user says not to use
+Herdr or the coordinator, or asks for the work directly, stop orchestrating
+immediately and do the work yourself as a normal direct agent — no packets,
+no gates, no advisor. The opt-out's default scope is the current task and its
+direct follow-ups; it covers the whole session only when the user says so
+explicitly. If a worker for the current task is already running, settle or
+harvest it before switching to direct work: read its state and capture what
+it produced first. A later instruction can turn Herdr back on; nothing here
+is permanent.
+
+**`CONSULT` is adaptive, never a default.** Open an advisor only when
+ambiguity, an architecture or design tradeoff, material risk, conflicting
+evidence, or a stall could actually change the route; a clearly-directed task
+skips `CONSULT` entirely. Advisor selection stays user-owned: if no choice is
+recorded, ask once and reuse the answer for later consults in the same task;
+never pick or substitute a model on the user's behalf.
+
+**Material progress, not motion, is the unit of work.** An artifact, a diff,
+a test result, a resolved decision, or an evidenced blocker counts as
+progress; a `working` status, streamed tokens, or another round of file reads
+do not. Roughly five minutes without material progress is a signal to
+inspect and consider redirecting — read the pane, judge whether the current
+path is still productive — not a hard timeout or an automatic kill. Replace a
+worker only once evidence shows its path is not working, never on the clock
+alone.
+
+**A changed intent restarts the gap analysis.** When the user changes what
+they want mid-task, update `DONE_WHEN` to match immediately: evidence, task
+packets, and gate verdicts tied to the superseded intent are now stale and no
+longer count toward it. Before dispatching anything under the revised
+outcome, redirect each affected worker with the new constraint or settle it —
+read its state and harvest what it produced — so nothing keeps running
+against an ask the user has already moved past.
+
+**Reuse a fresh result; do not re-verify without a relevant change.** Within
+the current task or run, once checks have produced a fresh, passing result
+for the integrated revision, reuse that result as long as the integrated
+revision, the relevant environment inputs, and the constraints it was
+checked against remain unchanged; rerunning the full suite again over that
+same unchanged state manufactures no new evidence. The instant any of those
+change — the revision, a relevant environment input, or a constraint — the
+prior result goes stale and must not be reused, no matter how little time
+has passed: staleness tracks what changed, never a mechanical, time-based
+timeout. Bring in a tester or an independent reviewer only when risk or an
+actual evidence gap needs independent judgment, never as a default step
+after every worker.
+
+`DONE` is asserted only when the user-visible outcome and its stated
+constraints have fresh, current-revision evidence behind them — never from a
+worker's claim or an agent state alone. None of this is harness-enforced by
+itself; it is the coordinator's judgment and the user's oversight, same as
+the rest of this skill. Only an installed permission profile (see [Role
+Boundaries](references/role-boundaries.md)) removes a tool at the harness
+level — wording never substitutes for that boundary.
+
 ## Non-negotiable contract
 
 - Act only within the user's request and authority. Never fabricate approval, intent, decisions, preferences, prior actions, access, or credentials — and never use delegation to obtain authority the user did not grant.
@@ -201,14 +278,17 @@ is opt-in only: reserve `advisor`/`consult` for an explicit adaptive
 4. Create only the panes or worktrees the task requires, preserving cwd and focus. Start each worker with its role profile and the model the user named.
 5. Send one complete direct-user prompt atomically, and confirm it was delivered.
 6. Wait with bounded lifecycle commands, inspect terminal evidence, resolve blockers within established intent or relay them, and redirect only with relevant new facts.
-7. Verify the integrated state: real diffs, fresh sentinel-guarded checks, and an independent read-only reviewer for material code changes. Resolve correctness and security findings before claiming completion.
+7. Verify the integrated state: real diffs and fresh sentinel-guarded checks; bring in a tester or an independent read-only reviewer only when risk or an actual evidence gap needs independent judgment, not as a default step for every change. Resolve correctness and security findings before claiming completion.
 8. Report one cohesive, evidence-backed result ending with a distinct section for anything that still needs a user decision — or state plainly that nothing does.
 
 ## Opt-in adaptive coordinator
 
 Activate adaptive routing only when the user explicitly asks for an adaptive
-coordinator or for coordinator plus advisor behavior. Without that opt-in, the
-workflow above and the existing small-task/direct-user behavior are unchanged.
+coordinator or for coordinator plus advisor behavior. The Outcome kernel above
+and the base Workflow above stay active either way — this opt-in controls
+only whether the adaptive checkpoint artifacts below (R0, overlay records,
+working plans, and gates) get produced, never a separate default path around
+the explicit opt-out.
 
 When active, read [Adaptive Coordinator with Tripwire Escalation](references/coordinator-advisor.md)
 as the normative hod `0.1.17` reference. It defines three base modes —
@@ -293,7 +373,7 @@ Ownership is exact paths or narrow globs with one live writer each; shared manif
 
 ## Coordinator-only mode
 
-When the user restricts the controller to coordination, honor it for the rest of the session: the line is between performing and reading. The controller performs nothing — no task-file edits (including "quick fixes"), builds, tests, debugging, reviewing, conflict resolution, or committing self-authored changes — and reads everything: planning, prompts, Herdr control commands, short read-only inspection, evidence judgment, and commits of verified worker changes when authorized. The only permitted write is the exact external adaptive checkpoint metadata required by the normative protocol; it is a narrow control-plane exception, not task work, and does not authorize any repository write. Delegating work while accepting claims without reading evidence is not delegation — it is abdication. Do not assume this mode without the user's request; for a single small task it costs more than it returns.
+This is the baseline from the Outcome kernel above, not a special mode to opt into: the line is between performing and reading, and it holds regardless of task size or a worker's speed. The controller performs nothing — no task-file edits (including "quick fixes"), builds, tests, debugging, reviewing, or conflict resolution by its own hands — and reads everything: planning, prompts, Herdr control commands, short read-only inspection, evidence judgment, and the commit/push exception described in the Outcome kernel for an already-verified, worker-authored diff under fresh user authority. The only other permitted write is the exact external adaptive checkpoint metadata required by the normative protocol; it is a narrow control-plane exception, not task work, and it authorizes nothing beyond that one path. Delegating work while accepting claims without reading evidence is not delegation — it is abdication. When the user explicitly asks to hold this line for the rest of the session, honor it across every later task until they say otherwise.
 
 ## Modes and detailed guidance
 

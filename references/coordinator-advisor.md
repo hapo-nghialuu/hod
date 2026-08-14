@@ -52,12 +52,16 @@ criteria make its recorded verdict stale.
 
 ## Base execution modes
 
-Adaptive routing chooses exactly one base mode. An overlay may pause or
-consult, but it is not a fourth mode or a planning level.
+`DIRECT`, `SINGLE`, and `ORCHESTRATE` are execution modes in service of one
+user outcome, not completion goals in themselves: the coordinator picks
+whichever mode reaches the observable `DONE_WHEN` with the least ceremony,
+and neither `SINGLE` nor `ORCHESTRATE` is "more done" than the other merely
+for being chosen. Adaptive routing chooses exactly one base mode. An overlay
+may pause or consult, but it is not a fourth mode or a planning level.
 
 | Mode | Use when | Coordinator action | Required artifact | Default participants |
 | --- | --- | --- | --- | --- |
-| `DIRECT` | Question, explanation, read-only inspection, or status | Answer from evidence; apply an overlay only when independently triggered | None for plain `DIRECT`; R0 plus the overlay artifact when overlaid | Coordinator only, plus an advisor for `CONSULT` |
+| `DIRECT` | Question, explanation, read-only inspection, status, or an explicit user opt-out from Herdr/coordinator | Answer from evidence; apply an overlay only when independently triggered; on opt-out, stop orchestrating and act directly instead | None for plain `DIRECT`; R0 plus the overlay artifact when overlaid; opt-out prints nothing | Coordinator only, plus an advisor for `CONSULT` |
 | `SINGLE` | One outcome, one writer, narrow ownership, reversible scope, and no hard-risk trigger | Send one task packet, monitor, and verify | Task packet; E0 for a repo change | One implementation worker; advisor only if triggered |
 | `ORCHESTRATE` | Multiple writers, dependencies, phases, repositories, architecture ambiguity, or large blast radius | Create a working plan, ownership map, and dependency order | Working plan; checkpoint only when required below | Multiple workers; G1 only when triggered |
 
@@ -164,10 +168,16 @@ These triggers are a safety net, not a complete semantic classifier.
 
 ### `CONSULT`
 
-Open a fresh advisor session for a technical decision that benefits from an
-independent assessment. The advisor does not edit files, start agents, choose
-another model for the user, approve an action, or expand authority. The
-coordinator asks one closed question and supplies a self-contained packet.
+Trigger a consult only when ambiguity, an architecture or design tradeoff,
+material risk, conflicting evidence, or a stall could actually change the
+route — never as a default step. A clearly-directed task skips `CONSULT`
+entirely and goes straight to a worker packet. Open a fresh advisor session
+for a technical decision that benefits from an independent assessment. The
+advisor does not edit files, start agents, choose another model for the user,
+approve an action, or expand authority. Model choice for the advisor stays
+user-owned (see Model policy below), never the coordinator's to pick or
+substitute. The coordinator asks one closed question and supplies a
+self-contained packet.
 
 ### `ASK_USER`
 

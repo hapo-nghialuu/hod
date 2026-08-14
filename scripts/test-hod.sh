@@ -228,6 +228,188 @@ expect_success 'HOD topology metadata contract is documented' \
 expect_success 'HOD topology metadata keeps task labels private and bounded' \
   check_hod_topology_privacy
 
+# Outcome kernel: coordinator-only + outcome ownership + adaptive CONSULT
+# must not be reintroduced with contradictory wording, and none of it may be
+# described as harness-enforced (that claim belongs only to installed
+# permission profiles).
+check_outcome_kernel_contract() {
+  python3 - "$repo_dir/SKILL.md" "$repo_dir/references/coordinator-advisor.md" <<'PY'
+import re
+import sys
+
+skill_path, adaptive_path = sys.argv[1:]
+skill_raw = open(skill_path, encoding="utf-8").read()
+adaptive_raw = open(adaptive_path, encoding="utf-8").read()
+
+
+def flattened(text):
+    # Markdown source hard-wraps prose, so a literal space in a pattern must
+    # not be defeated by a line break that only exists for line length.
+    return re.sub(r"\s+", " ", text.replace("`", "")).strip()
+
+
+skill = flattened(skill_raw)
+adaptive = flattened(adaptive_raw)
+combined = skill + " " + adaptive
+
+
+def require(pattern, label, haystack=combined):
+    if not re.search(pattern, haystack, re.I):
+        raise SystemExit(f"outcome kernel contract: missing {label}")
+
+
+if "## Outcome kernel" not in skill_raw:
+    raise SystemExit("outcome kernel contract: missing Outcome kernel section in SKILL.md")
+require(r"observable DONE_WHEN", "observable DONE_WHEN framing")
+require(
+    r"Coordinator-only is the default, not a special mode",
+    "coordinator-only stated as default, not opt-in",
+)
+require(
+    r"commits? or push(?:es|ing)? an already-verified, worker-authored diff",
+    "authorized commit/push of verified worker output",
+)
+require(
+    r"is not authoring it",
+    "committing/pushing worker output is not the controller authoring it",
+)
+require(r"Explicit opt-out outranks everything above", "opt-out precedence statement")
+require(r"current task and its direct follow-ups", "opt-out default scope")
+require(
+    r"whole session only when the user says so explicitly",
+    "opt-out session-wide scope requires an explicit ask",
+)
+require(
+    r"settle or harvest it before switching to direct work",
+    "settle/harvest running worker before going direct",
+)
+require(r"CONSULT is adaptive, never a default", "CONSULT framed as adaptive, not default")
+require(
+    r"ambiguity, an architecture or design tradeoff, material risk, conflicting evidence, or a stall",
+    "CONSULT trigger enumeration",
+)
+require(
+    r"clearly-directed task skips CONSULT entirely",
+    "clear-route task skips CONSULT/advisor/reviewer ceremony",
+)
+require(
+    r"five minutes without material progress",
+    "material-progress inspection window",
+)
+require(
+    r"not a hard timeout or an automatic kill",
+    "progress signal must not become a hard timeout",
+)
+require(
+    r"artifact, a diff, a test result, a resolved decision, or an evidenced blocker",
+    "material progress definition",
+)
+require(
+    r"none of this is harness-enforced by itself",
+    "no claim that this wording is runtime/harness enforcement",
+)
+require(
+    r"a changed intent restarts the gap analysis",
+    "changed-user-intent invalidation rule",
+)
+require(
+    r"evidence, task packets, and gate verdicts tied to the superseded intent are now stale",
+    "stale evidence/packets/verdicts on changed intent",
+)
+require(
+    r"redirect each affected worker with the new constraint or settle it",
+    "redirect-or-settle affected workers on changed intent",
+)
+require(
+    r"do not re-verify without a relevant change",
+    "no-repeat-full-suite-on-unchanged-revision rule",
+)
+require(
+    r"within the current task or run.*reuse that result as long as the "
+    r"integrated revision, the relevant environment inputs, and the "
+    r"constraints it was checked against remain unchanged",
+    "staleness reuse is scoped to the current task/run and gated on "
+    "revision/environment/constraints staying unchanged",
+)
+require(
+    r"rerunning the full suite again over that same unchanged state manufactures no new evidence",
+    "reuse fresh result instead of rerunning the full suite",
+)
+require(
+    r"staleness tracks what changed, never a mechanical, time-based timeout",
+    "staleness is evidence-driven, never a mechanical clock-based timeout",
+)
+require(
+    r"bring in a tester or an independent reviewer only when risk or an actual evidence gap needs independent judgment",
+    "tester/reviewer gated on risk or an evidence gap, not by default (Outcome kernel)",
+)
+require(
+    r"bring in a tester or an independent read-only reviewer only when risk "
+    r"or an actual evidence gap needs independent judgment, not as a default "
+    r"step for every change",
+    "workflow step 7 gates the independent reviewer on risk/evidence gap, not a default for every change",
+)
+
+# Regression: two superseded wordings a prior review flagged must never
+# reappear verbatim. Both used to read as an unconditional default rather
+# than a risk/evidence-gap-gated choice: workflow step 7 mandated an
+# independent reviewer for every material change, and the opt-in section
+# implied a direct-work shortcut existed outside the explicit opt-out.
+old_wordings = {
+    "workflow step 7 unconditional independent reviewer":
+        r"fresh sentinel-guarded checks, and an independent read-only "
+        r"reviewer for material code changes",
+    "opt-in section implying an unchanged small-task/direct-user default":
+        r"the existing small-task/direct-user behavior are unchanged",
+}
+for label, pattern in old_wordings.items():
+    if re.search(pattern, combined, re.I):
+        raise SystemExit(
+            f"outcome kernel contract: superseded wording reintroduced ({label})"
+        )
+PY
+}
+
+expect_success 'outcome kernel, opt-out precedence, and adaptive CONSULT contract is documented' \
+  check_outcome_kernel_contract
+
+# Coordinator-only baseline must not carry the old ambiguous "small edit"
+# exception, and both memo variants must state the same opt-out scope:
+# current task + direct follow-ups, session-wide only on an explicit ask.
+check_memo_template_wording() {
+  python3 - "$repo_dir/templates/memo.md" "$repo_dir/templates/memo-strict.md" <<'PY'
+import re
+import sys
+
+memo_path, strict_path = sys.argv[1:]
+memo = open(memo_path, encoding="utf-8").read()
+strict = open(strict_path, encoding="utf-8").read()
+
+
+def flattened(text):
+    return re.sub(r"\s+", " ", text.replace("`", "")).strip()
+
+
+memo_flat = flattened(memo)
+strict_flat = flattened(strict)
+
+if re.search(r"small edit", strict, re.I):
+    raise SystemExit(
+        "memo-strict template: the ambiguous 'small edit' direct-work "
+        "exception must not reappear; direct task work requires an "
+        "explicit opt-out, not a size judgment call"
+    )
+for label, text in (("memo.md", memo_flat), ("memo-strict.md", strict_flat)):
+    if "direct follow-ups" not in text:
+        raise SystemExit(f"{label}: missing opt-out default scope (direct follow-ups)")
+    if "rest of the session only if the user says so explicitly" not in text:
+        raise SystemExit(f"{label}: missing session-wide opt-out gate")
+PY
+}
+
+expect_success 'memo templates keep opt-out scope consistent and drop the ambiguous small-edit exception' \
+  check_memo_template_wording
+
 run_dispatch_regressions() {
   local fake_herdr=$tmp_root/fake-herdr
   local dispatch_cwd=$tmp_root/dispatch-cwd
@@ -2630,6 +2812,39 @@ expect_rejection 'memo flags without --project are rejected' \
   "$hod" install --memo-strict
 expect_rejection '--no-memo conflicts with --memo-strict' \
   "$hod" install --project "$mvar" --no-memo --memo-strict
+
+# Installer-generated memo blocks must carry the outcome-focus and opt-out
+# precedence policy too, in both the default and strict variants — not only
+# the canonical skill files.
+mpolicy=$tmp_root/projects/memo-policy
+new_memo_project "$mpolicy"
+expect_success 'install writes default memo for policy checks' \
+  "$hod" install --project "$mpolicy"
+expect_success 'default memo carries outcome-focus wording' \
+  grep -qF -- 'own the outcome, not just the delegation' "$mpolicy/CLAUDE.md"
+expect_success 'default memo carries opt-out precedence wording' \
+  grep -qF -- 'not to use Herdr or the coordinator' "$mpolicy/CLAUDE.md"
+expect_success 'default memo keeps questions/read-only/status direct' \
+  grep -qF -- 'Still answer' "$mpolicy/CLAUDE.md"
+expect_success 'default memo scopes opt-out to the task and its direct follow-ups' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'direct follow-ups'"
+expect_success 'default memo gates session-wide opt-out on an explicit ask' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'the rest of the session only if the user says so explicitly'"
+
+expect_success 'install --memo-strict rewrites for policy checks' \
+  "$hod" install --project "$mpolicy" --memo-strict
+expect_success 'strict memo carries outcome-focus wording' \
+  grep -qF -- 'own the outcome, not just the delegation' "$mpolicy/CLAUDE.md"
+expect_success 'strict memo carries opt-out precedence wording' \
+  grep -qF -- 'outranks this project preference' "$mpolicy/CLAUDE.md"
+expect_success 'strict memo keeps questions/read-only/status direct' \
+  grep -qF -- 'questions, read-only inspection,' "$mpolicy/CLAUDE.md"
+expect_success 'strict memo scopes opt-out to the task and its direct follow-ups' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'direct follow-ups'"
+expect_success 'strict memo gates session-wide opt-out on an explicit ask' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'the rest of the session only if the user says so explicitly'"
+expect_rejection 'strict memo drops the ambiguous small-edit exception' \
+  grep -qF -- 'small edit' "$mpolicy/CLAUDE.md"
 
 # ---------------------------------------------------------------------------
 # E0-style snapshot: all four Git change domains, paths, content, and staleness
