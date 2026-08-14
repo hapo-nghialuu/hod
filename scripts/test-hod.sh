@@ -68,9 +68,11 @@ record() {
 expect_success() {
   local name=$1
   shift
-  if "$@" >/dev/null 2>&1; then
+  local output
+  if output=$("$@" 2>&1); then
     record "$name" true
   else
+    printf '  output: %s\n' "$output" >&2
     record "$name" false
   fi
 }
@@ -78,7 +80,8 @@ expect_success() {
 expect_rejection() {
   local name=$1
   shift
-  if "$@" >/dev/null 2>&1; then
+  local output
+  if output=$("$@" 2>&1); then
     record "$name" false
   else
     record "$name" true
@@ -157,49 +160,19 @@ if not ttl_values or any(int(value) != expected_ttl for value in ttl_values):
         f"{ttl_values}"
     )
 
-if "topology_metadata_supported=true" not in text:
-    raise SystemExit("supported metadata capability path is missing")
-if "topology_metadata_supported=false" not in text:
-    raise SystemExit("legacy metadata fallback path is missing")
 if ".result.pane.pane_id" not in text or "HERDR_PANE_ID" not in text:
-    raise SystemExit("metadata contract does not require real pane IDs")
-for args_name in ("metadata_args", "report_args"):
-    recipe = re.search(
-        rf"(?ms)^[ \t]*(?:local[ \t]+)?{args_name}=\(\n(?P<body>.*?)^[ \t]*\)",
-        text,
-    )
-    if not recipe:
-        raise SystemExit(f"{args_name} recipe is missing")
-    command_lines = [
-        line.strip() for line in recipe.group("body").splitlines() if line.strip()
-    ]
-    recipe_ttl_lines = [
-        line for line in command_lines if line.startswith("--ttl-ms")
-    ]
-    if recipe_ttl_lines != [f"--ttl-ms {expected_ttl}"]:
-        raise SystemExit(
-            f"{args_name} must contain exactly one finite 24-hour TTL: "
-            f"{recipe_ttl_lines}"
-        )
-    if command_lines[:2] != [
-        'herdr pane report-metadata "$pane_id"',
-        "--source hod",
-    ]:
-        raise SystemExit(
-            f"{args_name} must place pane_id immediately after report-metadata"
-        )
-    pattern = rf'if\s+!\s+"\$\{{{args_name}\[@\]\}}"\s*;\s*then'
-    if not re.search(pattern, text):
-        raise SystemExit(f"{args_name} report is not fail-soft under set -e")
-    if re.search(
-        rf'if\s+!\s+"\$\{{{args_name}\[@\]\}}"\s+"\$pane_id"',
-        text,
-    ):
-        raise SystemExit(f"{args_name} invocation appends pane_id twice")
-if "HOD topology metadata report failed; UI topology may be stale." not in text:
-    raise SystemExit("metadata failure warning is missing")
-if not re.search(r"report_hod_topology\(\).*?return 0", text, re.S):
-    raise SystemExit("metadata helper does not normalize report failure to success")
+    raise SystemExit("dispatch does not require real pane IDs")
+if "hod dispatch start" not in text or "hod dispatch prompt" not in text:
+    raise SystemExit("guarded dispatch path is missing")
+if "pane get" not in text or "HOD_HERDR_BIN" not in text:
+    raise SystemExit("dispatch readback or test-only Herdr override is missing")
+if re.search(r"best-effort|fail-soft|continue the main orchestration unchanged", text, re.I):
+    raise SystemExit("supported Herdr topology still claims fail-soft behavior")
+if not re.search(r"old Herdr|older Herdr.*fail|before.*split", text, re.I | re.S):
+    raise SystemExit("old Herdr failure-before-split behavior is undocumented")
+for token in ("--source hod", "--ttl-ms 86400000", "hod_role", "hod_parent", "hod_relation", "hod_task", "hod_run"):
+    if token not in text:
+        raise SystemExit(f"dispatch metadata contract is missing: {token}")
 
 lines = text.splitlines()
 for role, relation in (
@@ -224,22 +197,12 @@ check_hod_topology_privacy() {
 import re
 import sys
 
-text = "\n".join(
-    open(path, encoding="utf-8").read() for path in sys.argv[1:]
-)
-task_values = re.findall(r'--token\s+"hod_task=([^"]+)"', text)
-if not task_values or any(value != "$task_label" for value in task_values):
-    raise SystemExit(f"hod_task is not bound only to the sanitized label: {task_values}")
+text = "\n".join(open(path, encoding="utf-8").read() for path in sys.argv[1:])
 if "[a-z0-9._-]" not in text or not re.search(r"at most 48", text, re.I):
     raise SystemExit("bounded task-label contract is missing")
-if re.search(
-    r'--token\s+"hod_task=[^"]*(?:prompt|transcript|secret|credential|'
-    r'api[_-]?key|bearer|token)',
-    text,
-    re.I,
-):
-    raise SystemExit("private or credential-like data appears in hod_task binding")
-if not re.search(r'--token\s+"hod_run=\$run_id"', text):
+if re.search(r"hod_task[^\n]*(?:prompt|transcript|secret|credential|api[_-]?key|bearer)", text, re.I):
+    raise SystemExit("private or credential-like data appears in task binding")
+if not re.search(r"hod_run[^\n]*(?:safe|identifier|run)", text, re.I):
     raise SystemExit("hod_run is not bound to the non-secret run identifier")
 PY
 }
@@ -249,6 +212,1418 @@ expect_success 'HOD topology metadata contract is documented' \
 expect_success 'HOD topology metadata keeps task labels private and bounded' \
   check_hod_topology_privacy
 
+run_dispatch_regressions() {
+  local fake_herdr=$tmp_root/fake-herdr
+  local dispatch_cwd=$tmp_root/dispatch-cwd
+  mkdir -p -- "$dispatch_cwd"
+
+  cat <<'EOF' | sed 's/\\\$/\$/g' >"$fake_herdr"
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+state=\${FAKE_DISPATCH_STATE:?}
+scenario=\${FAKE_DISPATCH_SCENARIO:-success}
+mkdir -p -- "$state"
+order_file=$state/order
+
+log() {
+  printf '%s\n' "$1" >>"$order_file"
+}
+
+safe_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+token_file() {
+  printf '%s/%s.tokens\n' "$state" "$(safe_name "$1")"
+}
+
+write_initial_child_tokens() {
+  local pane=$1 file child_task
+  [[ "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" ]] || return 0
+  [[ "\${FAKE_START_FRESH_CHILD:-0}" == 1 ]] && return 0
+  [[ "$scenario" == start_missing_child_tokens ]] && return 0
+  file=$(token_file "$pane")
+  [[ -e "$file" ]] && return 0
+  child_task=\${FAKE_INITIAL_CHILD_TASK:-old-task}
+  [[ "$scenario" == prompt_invalid_child_task ]] && child_task='bad/task'
+  printf 'hod_role=%s\n' "\${FAKE_INITIAL_CHILD_ROLE:-worker}" >"$file"
+  printf 'hod_parent=%s\n' "\${FAKE_INITIAL_CHILD_PARENT:-ctl}" >>"$file"
+  printf 'hod_relation=%s\n' "\${FAKE_INITIAL_CHILD_RELATION:-delegate}" >>"$file"
+  printf 'hod_task=%s\n' "$child_task" >>"$file"
+  printf 'hod_run=%s\n' "\${FAKE_INITIAL_CHILD_RUN:-run-redirect}" >>"$file"
+}
+
+tokens_json() {
+  local file=$1 tokens='{}' key value
+  [[ -f "$file" ]] || {
+    printf '{}\n'
+    return 0
+  }
+  while IFS='=' read -r key value; do
+    [[ -n "$key" ]] || continue
+    tokens=$(jq -cn --argjson object "$tokens" --arg key "$key" --arg value "$value" \
+      '$object + {($key): $value}')
+  done <"$file"
+  printf '%s\n' "$tokens"
+}
+
+agent_identity_json() {
+  local type=$1 status=${2:-idle} ready=${3:-true}
+  local name pane kind workspace session_id=session-1 terminal_id
+  local sequence revision=5
+  name=${FAKE_AGENT_NAME:-child-agent}
+  pane=${FAKE_CHILD_PANE:-child-pane}
+  kind=${FAKE_AGENT_KIND:-claude}
+  workspace=${FAKE_WORKSPACE:-ws-main}
+  terminal_id=term-$(safe_name "$pane")
+  [[ -f "$state/agent-name" ]] && name=$(<"$state/agent-name")
+  [[ -f "$state/agent-pane" ]] && pane=$(<"$state/agent-pane")
+  [[ -f "$state/agent-kind" ]] && kind=$(<"$state/agent-kind")
+  [[ -f "$state/agent-terminal" ]] && terminal_id=$(<"$state/agent-terminal")
+  sequence=0
+  [[ -f "$state/agent-seq" ]] && sequence=$(<"$state/agent-seq")
+  case "$scenario" in
+    wrong_start_identity)
+      [[ "$type" == agent_started ]] && name=wrong-start-name
+      ;;
+    wrong_prompt_identity)
+      [[ "$type" == agent_prompted ]] && pane=wrong-prompt-pane
+      ;;
+    wrong_get_identity)
+      [[ "$type" == agent_info ]] && workspace=wrong-get-workspace
+      ;;
+    prompt_kind_drift)
+      [[ "$type" == agent_info && "${get_count:-0}" -ge 2 ]] && kind=codex
+      ;;
+    prompt_identity_drift)
+      [[ "$type" == agent_info && "${get_count:-0}" -ge 2 ]] && name=replaced-agent
+      ;;
+    prompt_session_drift)
+      [[ "$type" == agent_info && "${get_count:-0}" -ge 2 ]] && session_id=session-2
+      ;;
+    prompt_terminal_drift)
+      [[ "$type" == agent_info && "${get_count:-0}" -ge 2 ]] && terminal_id=term-replaced
+      ;;
+    start_terminal_drift)
+      [[ "$type" == agent_info ]] && terminal_id=term-replaced
+      ;;
+    start_wrong_launch_terminal)
+      [[ "$type" == agent_started ]] && terminal_id=term-replaced
+      ;;
+    start_state_drift)
+      [[ "$type" == agent_info ]] && sequence=0
+      ;;
+    start_session_deferred|start_sessionless_done)
+      session_id=''
+      ;;
+    prompt_missing_session)
+      [[ "$type" == agent_prompted ]] && session_id=''
+      ;;
+  esac
+  jq -cn \
+    --arg type "$type" \
+    --arg name "$name" \
+    --arg pane_id "$pane" \
+    --arg agent "$kind" \
+    --arg workspace_id "$workspace" \
+    --arg status "$status" \
+    --arg session_id "$session_id" \
+    --arg terminal_id "$terminal_id" \
+    --argjson state_change_seq "$sequence" \
+    --argjson revision "$revision" \
+    --argjson ready "$ready" \
+    '{result: {type: $type, agent: {
+      name: $name,
+      pane_id: $pane_id,
+      agent: $agent,
+      agent_session: (if $session_id == "" then null else
+        {agent: $agent, kind: "id", source: "herdr:test", value: $session_id} end),
+      terminal_id: $terminal_id,
+      workspace_id: $workspace_id,
+      interactive_ready: $ready,
+      launch_pending: ($ready | not),
+      agent_status: $status,
+      state_change_seq: $state_change_seq,
+      revision: $revision
+    }}}'
+}
+
+help_output() {
+  case "$1 $2" in
+    'agent start')
+      if [[ "$scenario" == missing_capability ]]; then
+        printf '%s\n' 'Usage: herdr agent start <NAME>'
+      else
+        printf '%s\n' \
+          'Usage: herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]' \
+          '--kind <KIND>' \
+          '[possible values: pi, claude, codex, grok]' \
+          '--pane <ID>' \
+          '--timeout <MS>'
+      fi
+      ;;
+    'agent prompt')
+      printf '%s\n' \
+        'Usage: herdr agent prompt <TARGET> <TEXT> [OPTIONS]' \
+        '--wait' '--until <STATUS>' \
+        '[possible values: idle, working, blocked, done, unknown]' \
+        '--timeout <MS>'
+      ;;
+    'agent get')
+      printf '%s\n' 'Usage: herdr agent get <TARGET>'
+      ;;
+    'agent read')
+      printf '%s\n' \
+        'Usage: herdr agent read <TARGET> [OPTIONS]' \
+        '--source <SOURCE>' '[possible values: visible, recent, recent-unwrapped, detection]' \
+        '--lines <N>' '--format <FORMAT>' '[possible values: text, ansi]'
+      ;;
+    'pane get')
+      printf '%s\n' 'Usage: herdr pane get <pane_id>'
+      ;;
+    'pane report-metadata')
+      if [[ "$scenario" == missing_capability ]]; then
+        printf '%s\n' 'Usage: herdr pane report-metadata [OPTIONS] <PANE_ID>' '--source <ID>'
+      else
+        printf '%s\n' \
+          'Usage: herdr pane report-metadata [OPTIONS] --source <ID> <PANE_ID>' \
+          '--source <ID>' '--token <NAME=VALUE>' '--clear-token <NAME>' '--ttl-ms <N>'
+      fi
+      ;;
+    'pane split')
+      printf '%s\n' \
+        'Usage: herdr pane split [OPTIONS] [PANE_ID]' \
+        '--direction <DIRECTION>' '[possible values: right, down]' \
+        '--cwd <PATH>' '--no-focus'
+      ;;
+    'pane close')
+      printf '%s\n' 'Usage: herdr pane close <pane_id>'
+      ;;
+  esac
+}
+
+if [[ "\${3:-}" == --help ]]; then
+  help_output "$1" "$2"
+  exit 0
+fi
+
+if [[ "\${1:-}" == pane && "\${2:-}" == report-metadata ]]; then
+  pane=\${3:-}
+  log "report:$pane"
+  count_file=$state/report-count
+  count=0
+  [[ -f "$count_file" ]] && count=$(<"$count_file")
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$count_file"
+  printf '%s\0' "$@" >"$state/report-$count.argv"
+  if [[ "$scenario" == report_fail ||
+    ( ( "$scenario" == child_report_fail || "$scenario" == child_report_close_fail ||
+      "$scenario" == cleanup_agent_claimed ||
+      "$scenario" == cleanup_get_term_ignoring ||
+      "$scenario" == cleanup_early_expiry ) &&
+      "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" ) ]]; then
+    [[ "$scenario" == cleanup_agent_claimed ]] && : >"$state/cleanup-agent-claimed"
+    [[ "$scenario" == cleanup_get_term_ignoring ]] && : >"$state/cleanup-hang"
+    [[ "$scenario" == cleanup_early_expiry ]] && : >"$state/cleanup-early-expiry"
+    printf '%s\n' 'report_failure' >&2
+    exit 23
+  fi
+  file=$(token_file "$pane")
+  : >"$file"
+  args=("$@")
+  for ((index = 4; index < \${#args[@]}; index += 1)); do
+    if [[ "\${args[index]}" == --token && $((index + 1)) -lt \${#args[@]} ]]; then
+      item=\${args[index + 1]}
+      printf '%s\n' "$item" >>"$file"
+    fi
+  done
+  exit 0
+fi
+
+write_initial_controller_tokens() {
+  local controller_file controller_run controller_task
+  [[ "$pane" == "\${FAKE_CONTROLLER_PANE:-ctl}" ]] || return 0
+  [[ "\${FAKE_INITIAL_CONTROLLER_ROLE:-}" == controller ]] || return 0
+  [[ "$scenario" == start_bootstrap_empty ]] && return 0
+  controller_file=$(token_file "$pane")
+  [[ -e "$controller_file" ]] && return 0
+  case "$scenario" in
+    start_child_tokens)
+      printf 'hod_role=worker\n' >"$controller_file"
+      printf 'hod_parent=other-controller\n' >>"$controller_file"
+      printf 'hod_relation=delegate\n' >>"$controller_file"
+      printf 'hod_task=old-child-task\n' >>"$controller_file"
+      printf 'hod_run=%s\n' "\${FAKE_INITIAL_CONTROLLER_RUN:-old-run}" >>"$controller_file"
+      return 0
+      ;;
+    start_partial_tokens)
+      printf 'hod_role=controller\n' >"$controller_file"
+      printf 'hod_run=%s\n' "\${FAKE_INITIAL_CONTROLLER_RUN:-old-run}" >>"$controller_file"
+      return 0
+      ;;
+    start_invalid_tokens)
+      printf 'hod_role=controller\n' >"$controller_file"
+      printf 'hod_task=old-controller-task\n' >>"$controller_file"
+      printf 'hod_run=%s\n' "\${FAKE_INITIAL_CONTROLLER_RUN:-old-run}" >>"$controller_file"
+      printf 'hod_extra=unexpected\n' >>"$controller_file"
+      return 0
+      ;;
+  esac
+  controller_run=\${FAKE_INITIAL_CONTROLLER_RUN:-old-controller-run}
+  controller_task=\${FAKE_INITIAL_CONTROLLER_TASK:-old-controller-task}
+  [[ "$scenario" == start_controller_wrong_run ]] && controller_run=other-controller-run
+  [[ "$scenario" == start_invalid_existing_task ]] && controller_task='bad/task'
+  [[ "$scenario" == start_invalid_existing_run ]] && controller_run='bad/run'
+  printf 'hod_role=controller\n' >"$controller_file"
+  printf 'hod_task=%s\n' "$controller_task" >>"$controller_file"
+  printf 'hod_run=%s\n' "$controller_run" >>"$controller_file"
+}
+
+if [[ "\${1:-}" == pane && "\${2:-}" == close ]]; then
+  log "close:\${3:-}"
+  printf '%s\0' "$@" >"$state/close.argv"
+  if [[ "$scenario" == child_report_close_fail ]]; then
+    printf '%s\n' 'close_failure' >&2
+    exit 51
+  fi
+  exit 0
+fi
+
+if [[ "\${1:-}" == pane && "\${2:-}" == get ]]; then
+  pane=\${3:-}
+  log "get:$pane"
+  if [[ "$scenario" == cleanup_get_term_ignoring &&
+    "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" && -f "$state/cleanup-hang" ]]; then
+    trap '' TERM
+    exec sleep 30
+  fi
+  if [[ "$scenario" == cleanup_early_expiry &&
+    "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" &&
+    -f "$state/cleanup-early-expiry" ]]; then
+    kill -USR1 "$PPID"
+    trap '' TERM
+    exec sleep 30
+  fi
+  if [[ "$scenario" == get_fail ]]; then
+    printf '%s\n' 'readback_failure' >&2
+    exit 29
+  fi
+  write_initial_controller_tokens
+  write_initial_child_tokens "$pane"
+  file=$(token_file "$pane")
+  if [[ "$scenario" == readback_fail || "$scenario" == prompt_readback_fail ]] &&
+    [[ "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" ]]; then
+    : >"$state/malformed-readback"
+    printf '%s\n' '{"result":{"pane":'
+    exit 0
+  fi
+  tokens=$(tokens_json "$file")
+  workspace=\${FAKE_WORKSPACE:-ws-main}
+  if [[ "$scenario" == prompt_controller_workspace_drift &&
+    "$pane" == "\${FAKE_CONTROLLER_PANE:-ctl}" && -f "$state/report-count" ]]; then
+    workspace=ws-other
+  fi
+  agent_status=idle
+  agent=''
+  agent_session=''
+  terminal_id=term-$(safe_name "$pane")
+  pane_revision=0
+  if [[ "$scenario" == malformed_tokens && "$pane" == "\${FAKE_CONTROLLER_PANE:-ctl}" ]]; then
+    jq -cn \
+      --arg pane_id "$pane" --arg workspace_id "$workspace" \
+      --arg cwd "\${FAKE_CWD:-/tmp}" --arg agent_status "$agent_status" \
+      '{result:{pane:{pane_id:$pane_id,workspace_id:$workspace_id,cwd:$cwd,
+        agent_status:$agent_status,revision:0,tokens:"malformed"}}}'
+    exit 0
+  fi
+  if [[ "$scenario" == wrong_workspace && "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" ]]; then
+    workspace=ws-other
+  fi
+  if [[ "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" ]]; then
+    if [[ -f "$state/started" ]]; then
+      agent=\${FAKE_AGENT_KIND:-claude}
+      agent_session=session-1
+      pane_revision=5
+    elif [[ "\${FAKE_START_FRESH_CHILD:-0}" != 1 ]]; then
+      agent=\${FAKE_AGENT_KIND:-claude}
+      agent_session=session-1
+      pane_revision=5
+    elif [[ "$scenario" == start_child_preclaimed ]]; then
+      agent=codex
+      agent_session=claimed-session
+    elif [[ "$scenario" == cleanup_agent_claimed &&
+      -f "$state/cleanup-agent-claimed" ]]; then
+      agent=codex
+    fi
+    if [[ "$scenario" == start_child_claimed_after_report &&
+      -f "$state/report-count" && "$(<"$state/report-count")" -ge 2 ]]; then
+      agent=codex
+      agent_session=claimed-after-report
+      pane_revision=1
+    fi
+    if [[ "$scenario" == prompt_session_drift &&
+      -f "$state/agent-get-count" && "$(<"$state/agent-get-count")" -ge 2 ]]; then
+      agent_session=session-2
+      pane_revision=6
+    fi
+    [[ "$scenario" == working_child ]] && agent_status=working
+    if [[ "$scenario" == final_workspace_race && -e "$state/prompted" ]]; then
+      workspace=ws-race
+    fi
+    if [[ "$scenario" == wrong_parent ]]; then
+      tokens=$(jq -cn --argjson object "$tokens" '$object + {hod_parent:"other-parent"}')
+    elif [[ "$scenario" == wrong_run ]]; then
+      tokens=$(jq -cn --argjson object "$tokens" '$object + {hod_run:"other-run"}')
+    elif [[ "$scenario" == wrong_relation ]]; then
+      tokens=$(jq -cn --argjson object "$tokens" '$object + {hod_relation:"consult"}')
+    elif [[ "$scenario" == post_start_mismatch && -e "$state/started" ]]; then
+      tokens=$(jq -cn --argjson object "$tokens" '$object + {hod_run:"post-start-wrong"}')
+    fi
+  elif [[ "$pane" == "\${FAKE_CONTROLLER_PANE:-ctl}" ]]; then
+    if [[ "$scenario" == start_controller_revision_regress ]]; then
+      pane_revision=5
+      [[ -f "$state/report-count" ]] && pane_revision=0
+    fi
+    if [[ "$scenario" == start_controller_terminal_drift && -f "$state/report-count" ]]; then
+      terminal_id=term-replaced-controller
+    fi
+    if [[ "$scenario" == prompt_controller_session_drift && -f "$state/report-count" ]]; then
+      agent=codex
+      agent_session=replaced-controller-session
+    fi
+    if [[ "$scenario" == rollback_controller_session_drift && -f "$state/split.argv" ]]; then
+      agent=codex
+      agent_session=replaced-controller-session
+      pane_revision=1
+    fi
+  fi
+  pane_json=$(jq -cn \
+    --arg pane_id "$pane" \
+    --arg workspace_id "$workspace" \
+    --arg cwd "\${FAKE_CWD:-/tmp}" \
+    --arg agent_status "$agent_status" \
+    --arg agent "$agent" \
+    --arg agent_session "$agent_session" \
+    --arg terminal_id "$terminal_id" \
+    --argjson revision "$pane_revision" \
+    --argjson tokens "$tokens" \
+    '{result:{pane:{pane_id:$pane_id, workspace_id:$workspace_id, cwd:$cwd,
+      agent_status:$agent_status,
+      agent:(if $agent == "" then null else $agent end),
+      agent_session:(if $agent_session == "" then null else
+        {agent:$agent,kind:"id",source:"herdr:test",value:$agent_session} end),
+      terminal_id:$terminal_id,revision:$revision,tokens:$tokens}}}')
+  if [[ "$scenario" == start_missing_child_tokens &&
+    "$pane" == "\${FAKE_CHILD_PANE:-child-pane}" && ! -f "$file" ]]; then
+    printf '%s\n' "$pane_json" | jq -c 'del(.result.pane.tokens)'
+  else
+    printf '%s\n' "$pane_json"
+  fi
+  exit 0
+fi
+
+if [[ "\${1:-}" == agent && "\${2:-}" == get ]]; then
+  target=\${3:-}
+  log "agent-get:$target"
+  if [[ "$scenario" == get_fail ]]; then
+    printf '%s\n' 'agent_get_failure' >&2
+    exit 29
+  fi
+  if [[ "$scenario" == get_hang ]]; then
+    exec sleep 5
+  fi
+  if [[ "$scenario" == get_term_ignoring ]]; then
+    trap '' TERM
+    exec sleep 30
+  fi
+  get_count_file=$state/agent-get-count
+  get_count=0
+  [[ -f "$get_count_file" ]] && get_count=$(<"$get_count_file")
+  get_count=$((get_count + 1))
+  printf '%s\n' "$get_count" >"$get_count_file"
+  ready=true
+  status=idle
+  if [[ "$scenario" == delayed_readiness && $get_count -lt 3 ]]; then
+    ready=false
+  elif [[ "$scenario" == readiness_never ]]; then
+    ready=false
+  elif [[ "$scenario" == working_after_start ||
+    "$scenario" == prompt_agent_working ]]; then
+    status=working
+  elif [[ "$scenario" == prompt_agent_not_ready ]]; then
+    ready=false
+  fi
+  if [[ "$scenario" == prompt_state_drift && $get_count -ge 2 ]]; then
+    printf '%s\n' 2 >"$state/agent-seq"
+  fi
+  if [[ "$scenario" == delayed_readiness && $get_count -le 3 ]]; then
+    printf '%s\n' "$get_count" >"$state/agent-seq"
+  elif [[ ! -f "$state/agent-seq" ]]; then
+    printf '%s\n' 1 >"$state/agent-seq"
+  fi
+  agent_identity_json agent_info "$status" "$ready"
+  exit 0
+fi
+
+if [[ "\${1:-}" == agent && "\${2:-}" == read ]]; then
+  target=\${3:-}
+  log "agent-read:$target"
+  read_count_file=$state/agent-read-count
+  read_count=0
+  [[ -f "$read_count_file" ]] && read_count=$(<"$read_count_file")
+  read_count=$((read_count + 1))
+  printf '%s\n' "$read_count" >"$read_count_file"
+  if [[ "$scenario" == codex_surface_never ||
+    ( "$scenario" == codex_surface_delayed && $read_count -lt 3 ) ]]; then
+    printf '%s\n' 'codex process launching'
+  else
+    printf '%s\n' 'OpenAI Codex' '› Ready'
+  fi
+  exit 0
+fi
+
+if [[ "\${1:-}" == pane && "\${2:-}" == split ]]; then
+  if [[ $# -ne 8 || -z "\${3:-}" || "\${3:-}" == --* ||
+    "\${4:-}" != --direction || -z "\${5:-}" ||
+    "\${6:-}" != --cwd || -z "\${7:-}" ||
+    "\${8:-}" != --no-focus ]]; then
+    printf '%s\n' 'pane split requires PANE_ID immediately after split' >&2
+    exit 32
+  fi
+  log split
+  printf '%s\0' "$@" >"$state/split.argv"
+  if [[ "$scenario" == split_failure || "$scenario" == rollback_controller_session_drift ]]; then
+    printf '%s\n' 'split_failure' >&2
+    exit 31
+  fi
+  if [[ "$scenario" == split_bad_json ]]; then
+    printf '%s\n' '{}'
+    exit 0
+  fi
+  child=\${FAKE_CHILD_PANE:-child-pane}
+  [[ "$scenario" == split_same_controller ]] && child=\${FAKE_CONTROLLER_PANE:-ctl}
+  printf '%s\n' "$child" >"$state/child"
+  workspace=\${FAKE_WORKSPACE:-ws-main}
+  [[ "$scenario" == wrong_workspace ]] && workspace=ws-other
+  jq -cn --arg pane_id "$child" --arg workspace_id "$workspace" \
+    --arg terminal_id "term-$(safe_name "$child")" \
+    '{result:{pane:{pane_id:$pane_id, workspace_id:$workspace_id,
+      terminal_id:$terminal_id}}}'
+  exit 0
+fi
+
+if [[ "\${1:-}" == agent && "\${2:-}" == start ]]; then
+  agent_name=\${3:-}
+  log start
+  printf '%s\0' "$@" >"$state/start.argv"
+  args=("$@")
+  kind=claude
+  pane=\${FAKE_CHILD_PANE:-child-pane}
+  for ((index = 0; index < \${#args[@]}; index += 1)); do
+    [[ "\${args[index]}" == --kind ]] && kind=\${args[index + 1]}
+    [[ "\${args[index]}" == --pane ]] && pane=\${args[index + 1]}
+  done
+  printf '%s\n' "$agent_name" >"$state/agent-name"
+  printf '%s\n' "$kind" >"$state/agent-kind"
+  printf '%s\n' "$pane" >"$state/agent-pane"
+  FAKE_AGENT_NAME="$agent_name"
+  FAKE_AGENT_KIND="$kind"
+  FAKE_CHILD_PANE="$pane"
+  export FAKE_AGENT_NAME FAKE_AGENT_KIND FAKE_CHILD_PANE
+  if [[ "$scenario" == duplicate_name ]]; then
+    printf '%s\n' '{"error":{"code":"agent_name_taken","message":"duplicate agent name"}}' >&2
+    exit 37
+  fi
+  if [[ "$scenario" == malformed_start_exit0 ]]; then
+    printf '%s\n' '{}'
+    exit 0
+  fi
+  if [[ "$scenario" == forged_start_exit0 ]]; then
+    printf '%s\n' '{"result":{"type":"agent_started","agent":{"name":"forged"}}}'
+    exit 0
+  fi
+  if [[ "$scenario" == start_fail ]]; then
+    printf '%s\n' '{"error":{"code":"agent_start_failed","message":"start_failure"}}' >&2
+    exit 37
+  fi
+  if [[ "$scenario" == start_message_contains_busy ]]; then
+    printf '%s\n' \
+      '{"error":{"code":"agent_start_failed","message":"agent_pane_busy"}}' >&2
+    exit 37
+  fi
+  if [[ "$scenario" == busy_once && ! -e "$state/busy-seen" ]]; then
+    : >"$state/busy-seen"
+    printf '%s\n' \
+      '{"error":{"code":"agent_pane_busy","message":"short race"}}' >&2
+    exit 41
+  fi
+  if [[ "$scenario" == busy_always ]]; then
+    printf '%s\n' \
+      '{"error":{"code":"agent_pane_busy","message":"persistent race"}}' >&2
+    exit 41
+  fi
+  : >"$state/started"
+  printf '%s\n' 1 >"$state/agent-seq"
+  if [[ "$scenario" == start_not_ready || "$scenario" == delayed_readiness ]]; then
+    agent_identity_json agent_started idle false
+  else
+    agent_identity_json agent_started idle true
+  fi
+  exit 0
+fi
+
+if [[ "\${1:-}" == agent && "\${2:-}" == prompt ]]; then
+  log prompt
+  printf '%s\0' "$@" >"$state/prompt.argv"
+  if [[ "$scenario" == prompt_fail ]]; then
+    printf '%s\n' 'prompt_failure' >&2
+    exit 43
+  fi
+  if [[ "$scenario" == prompt_stalled ]]; then
+    printf '%s\n' '{"error":{"code":"agent_prompt_stalled","message":"prompt stalled"}}' >&2
+    exit 47
+  fi
+  if [[ "$scenario" == malformed_prompt_exit0 ]]; then
+    printf '%s\n' '{"result":{"type":"agent_prompted"'
+    exit 0
+  fi
+  if [[ "$scenario" == forged_prompt_exit0 ]]; then
+    printf '%s\n' '{"result":{"agent_status":"working"}}'
+    exit 0
+  fi
+  prompt_seq=1
+  [[ -f "$state/agent-seq" ]] && prompt_seq=$(<"$state/agent-seq")
+  if [[ "$scenario" == stale_prompt_seq ]]; then
+    printf '%s\n' "$prompt_seq" >"$state/agent-seq"
+  else
+    prompt_seq=$((prompt_seq + 1))
+    printf '%s\n' "$prompt_seq" >"$state/agent-seq"
+  fi
+  if [[ "$scenario" == prompt_blocked ]]; then
+    : >"$state/prompted"
+    agent_identity_json agent_prompted blocked true
+    exit 0
+  fi
+  if [[ "$scenario" == start_sessionless_done ]]; then
+    : >"$state/prompted"
+    agent_identity_json agent_prompted done true
+    exit 0
+  fi
+  : >"$state/prompted"
+  agent_identity_json agent_prompted working true
+  exit 0
+fi
+
+printf 'unexpected fake Herdr argv:' >&2
+printf ' %q' "$@" >&2
+printf '\n' >&2
+exit 97
+EOF
+  chmod +x "$fake_herdr"
+
+  dispatch_relation() {
+    case "$1" in
+      worker) printf 'delegate\n' ;;
+      advisor) printf 'consult\n' ;;
+      reviewer|tester) printf 'verify\n' ;;
+      *) return 1 ;;
+    esac
+  }
+
+  dispatch_start() {
+    local state=$1 role=$2 task=$3 run=$4 kind=$5 cwd=$6 direction=$7
+    local timeout=$8 scenario=$9 prompt=${10} name=${11:-}
+    local name_option=${12:---name}
+    local advisor_choice=${13:-} advisor_model=${14:-} native_model controller_task
+    native_model=$role-model
+    controller_task=$task
+    case "$scenario" in
+      duplicate_name|split_failure|split_bad_json|child_report_fail|cleanup_agent_claimed|\
+      rollback_controller_session_drift|start_child_claimed_after_report|\
+      cleanup_get_term_ignoring|cleanup_early_expiry)
+        controller_task=original-task
+        ;;
+    esac
+    if [[ "$role" == advisor && "$advisor_model" != __omit__ ]]; then
+      native_model=$advisor_model
+    elif [[ "$role" == advisor ]]; then
+      native_model=arbitrary-model
+    fi
+    local -a start_args=("$hod" dispatch start)
+    [[ -n "$name" ]] && start_args+=("$name_option" "$name")
+    start_args+=(
+      --role "$role"
+      --task "$task"
+      --run "$run"
+      --kind "$kind"
+      --cwd "$cwd"
+      --direction "$direction"
+      --timeout "$timeout"
+    )
+    if [[ "$role" == advisor && "$advisor_choice" != __omit__ &&
+      "$advisor_model" != __omit__ ]]; then
+      start_args+=(--advisor-choice "$advisor_choice" --advisor-model "$advisor_model")
+    elif [[ "$role" != advisor && ( -n "$advisor_choice" || -n "$advisor_model" ) ]]; then
+      start_args+=(--advisor-choice "${advisor_choice:-fable}" --advisor-model "${advisor_model:-fable}")
+    fi
+    case ${HOD_TEST_NATIVE_MODE:-default} in
+      resume)
+        start_args+=(-- resume session-id)
+        ;;
+      claude-resume)
+        start_args+=(-- --resume session-id)
+        ;;
+      dangerous)
+        start_args+=(-- --model "$native_model" --dangerously-skip-permissions)
+        ;;
+      *)
+        start_args+=(-- --model "$native_model" --native-value 'value with spaces')
+        ;;
+    esac
+    mkdir -p -- "$state"
+    printf '%s' "$prompt" | env \
+      HERDR_ENV=1 \
+      HERDR_PANE_ID=ctl \
+      HOD_HERDR_BIN="$fake_herdr" \
+      FAKE_DISPATCH_STATE="$state" \
+      FAKE_DISPATCH_SCENARIO="$scenario" \
+      FAKE_CHILD_PANE=child-pane \
+      FAKE_WORKSPACE=ws-main \
+      FAKE_CWD="$cwd" \
+      FAKE_START_FRESH_CHILD=1 \
+      FAKE_INITIAL_CHILD_ROLE="$role" \
+      FAKE_INITIAL_CHILD_PARENT=ctl \
+      FAKE_INITIAL_CHILD_RELATION="$(dispatch_relation "$role" 2>/dev/null || printf 'delegate')" \
+      FAKE_INITIAL_CHILD_RUN="$run" \
+      FAKE_INITIAL_CONTROLLER_ROLE=controller \
+      FAKE_INITIAL_CONTROLLER_TASK="$controller_task" \
+      FAKE_INITIAL_CONTROLLER_RUN="$run" \
+      "${start_args[@]}" \
+      >"$state/receipt.json"
+  }
+
+  dispatch_start_with_native_mode() {
+    local mode=$1
+    shift
+    HOD_TEST_NATIVE_MODE=$mode dispatch_start "$@"
+  }
+
+  dispatch_prompt() {
+    local state=$1 task=$2 run=$3 role=$4 scenario=$5 prompt=$6
+    local parent=ctl relation controller_run=run-redirect
+    shift 6
+    relation=$(dispatch_relation "$role")
+    case "$scenario" in
+      prompt_wrong_parent) parent=other-parent ;;
+      prompt_wrong_relation) relation=consult ;;
+      prompt_wrong_run) run=other-run ;;
+      stale_controller) controller_run=old-controller-run ;;
+    esac
+    mkdir -p -- "$state"
+    printf '%s' "$prompt" | env \
+      HERDR_ENV=1 \
+      HERDR_PANE_ID=ctl \
+      HOD_HERDR_BIN="$fake_herdr" \
+      FAKE_DISPATCH_STATE="$state" \
+      FAKE_DISPATCH_SCENARIO="$scenario" \
+      FAKE_CHILD_PANE=child-pane \
+      FAKE_WORKSPACE=ws-main \
+      FAKE_INITIAL_CHILD_ROLE="$role" \
+      FAKE_INITIAL_CHILD_PARENT="$parent" \
+      FAKE_INITIAL_CHILD_RELATION="$relation" \
+      FAKE_INITIAL_CHILD_RUN="$run" \
+      FAKE_INITIAL_CHILD_TASK=old-task \
+      FAKE_INITIAL_CONTROLLER_ROLE=controller \
+      FAKE_INITIAL_CONTROLLER_TASK=old-controller-task \
+      FAKE_INITIAL_CONTROLLER_RUN="$controller_run" \
+      FAKE_AGENT_NAME=redirect-agent \
+      FAKE_AGENT_KIND=claude \
+      "$hod" dispatch prompt \
+      --pane child-pane \
+      --kind claude \
+      --task "$task" \
+      --run run-redirect \
+      --timeout 120000 \
+      "$@"
+  }
+
+  assert_no_lifecycle_after_failure() {
+    local state=$1
+    [[ ! -f "$state/order" ]] || ! grep -Eq '(^|:)(start|prompt)$' "$state/order"
+  }
+
+  assert_no_dispatch_mutation() {
+    local state=$1
+    [[ ! -f "$state/order" ]] ||
+      ! grep -Eq '^(report|split|start|prompt)(:|$)' "$state/order"
+  }
+
+  assert_no_report_or_prompt() {
+    local state=$1
+    [[ ! -f "$state/order" ]] || ! grep -Eq '^(report|prompt)(:|$)' "$state/order"
+  }
+
+  dispatch_start_with_nul() {
+    local state=$1
+    mkdir -p -- "$state"
+    printf 'prefix\0suffix' | env \
+      HERDR_ENV=1 \
+      HERDR_PANE_ID=ctl \
+      HOD_HERDR_BIN="$fake_herdr" \
+      FAKE_DISPATCH_STATE="$state" \
+      FAKE_DISPATCH_SCENARIO=success \
+      FAKE_CHILD_PANE=child-pane \
+      FAKE_WORKSPACE=ws-main \
+      FAKE_CWD="$dispatch_cwd" \
+      FAKE_INITIAL_CHILD_ROLE=worker \
+      FAKE_INITIAL_CHILD_PARENT=ctl \
+      FAKE_INITIAL_CHILD_RELATION=delegate \
+      FAKE_INITIAL_CHILD_RUN=run-nul \
+      "$hod" dispatch start \
+      --name worker-nul --role worker --task task-nul --run run-nul \
+      --kind claude --cwd "$dispatch_cwd" --direction right --timeout 120000 \
+      -- --model worker-model \
+      >"$state/receipt.json"
+  }
+
+  local role relation state prompt lock_key lock_dir oversized_prompt
+  local cleanup_started cleanup_elapsed cleanup_lock_key
+
+  for scenario in duplicate_name malformed_start_exit0 forged_start_exit0 \
+    wrong_start_identity readiness_never working_after_start \
+    wrong_get_identity start_state_drift start_wrong_launch_terminal \
+    start_controller_terminal_drift start_controller_revision_regress; do
+    state=$tmp_root/dispatch-start-$scenario
+    scenario_timeout=120000
+    [[ "$scenario" == readiness_never || "$scenario" == working_after_start ]] &&
+      scenario_timeout=1000
+    expect_rejection "dispatch rejects $scenario" \
+      dispatch_start "$state" worker "task-$scenario" "run-$scenario" claude \
+      "$dispatch_cwd" right "$scenario_timeout" "$scenario" "$scenario" worker-$scenario
+    expect_success "$scenario never prompts" test ! -e "$state/prompt.argv"
+  done
+
+  for scenario in start_controller_terminal_drift start_controller_revision_regress; do
+    state=$tmp_root/dispatch-start-$scenario
+    expect_success "$scenario stops before split or agent lifecycle" \
+      test ! -e "$state/split.argv" -a ! -e "$state/start.argv" -a ! -e "$state/prompt.argv"
+  done
+
+  state=$tmp_root/dispatch-start-duplicate_name
+  expect_success 'duplicate name closes the proven fresh unstarted child' \
+    test -e "$state/close.argv"
+  expect_success 'duplicate name restores the previous controller task' \
+    grep -qxF 'hod_task=original-task' "$state/ctl.tokens"
+
+  state=$tmp_root/dispatch-start-child-preclaimed
+  expect_rejection 'dispatch rejects a fresh child claimed before topology binding' \
+    dispatch_start "$state" worker task-preclaimed run-preclaimed claude \
+    "$dispatch_cwd" right 120000 start_child_preclaimed \
+    'preclaimed child' worker-preclaimed
+  expect_success 'preclaimed child is never relabeled, started, prompted, or closed' \
+    test "$(grep -c '^report:child-pane$' "$state/order" || true)" -eq 0 \
+      -a ! -e "$state/start.argv" -a ! -e "$state/prompt.argv" -a ! -e "$state/close.argv"
+
+  state=$tmp_root/dispatch-start-child-claimed-after-report
+  expect_rejection 'dispatch rejects a fresh child claimed during topology binding' \
+    dispatch_start "$state" worker task-claimed-after run-claimed-after claude \
+    "$dispatch_cwd" right 120000 start_child_claimed_after_report \
+    'claimed during binding' worker-claimed-after
+  expect_success 'claimed-after-report child is never started, prompted, or closed' \
+    test "$(grep -c '^report:child-pane$' "$state/order" || true)" -eq 1 \
+      -a ! -e "$state/start.argv" -a ! -e "$state/prompt.argv" -a ! -e "$state/close.argv"
+  expect_success 'claimed-after-report failure restores only the unchanged controller owner' \
+    grep -qxF 'hod_task=original-task' "$state/ctl.tokens"
+
+  state=$tmp_root/dispatch-start-delayed-readiness
+  expect_success 'dispatch settles delayed agent readiness before prompt' \
+    dispatch_start "$state" worker task-delayed run-delayed claude \
+    "$dispatch_cwd" right 120000 delayed_readiness 'delayed readiness' worker-delayed
+  expect_success 'delayed readiness probes agent get before one prompt' \
+    test "$(grep -c '^agent-get:' "$state/order" || true)" -ge 3 \
+      -a "$(grep -c '^prompt$' "$state/order" || true)" -eq 1
+
+  state=$tmp_root/dispatch-start-session-deferred
+  expect_success 'dispatch start accepts a sessionless first prompt bound to its launch terminal' \
+    dispatch_start "$state" worker task-session run-session claude \
+    "$dispatch_cwd" right 120000 start_session_deferred 'deferred session' worker-session
+  expect_success 'sessionless first delivery still sends exactly one prompt' \
+    test "$(grep -c '^prompt$' "$state/order" || true)" -eq 1
+
+  state=$tmp_root/dispatch-start-sessionless-done
+  expect_rejection 'dispatch never reports a sessionless idle completion as delivered' \
+    dispatch_start "$state" worker task-session-done run-session-done claude \
+    "$dispatch_cwd" right 120000 start_sessionless_done \
+    'sessionless done' worker-sessionless-done
+  expect_success 'ambiguous sessionless completion is attempted only once' \
+    test "$(grep -c '^prompt$' "$state/order" || true)" -eq 1 \
+      -a ! -e "$state/close.argv"
+
+  state=$tmp_root/dispatch-start-terminal-drift
+  expect_rejection 'dispatch start rejects a changed launch terminal' \
+    dispatch_start "$state" worker task-terminal run-terminal claude \
+    "$dispatch_cwd" right 500 start_terminal_drift 'terminal drift' worker-terminal
+  expect_success 'start terminal drift never prompts a changed agent' \
+    test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-start-codex-surface-delayed
+  expect_success 'dispatch waits for the real Codex prompt surface' \
+    dispatch_start "$state" tester task-codex-ready run-codex-ready codex \
+    "$dispatch_cwd" right 120000 codex_surface_delayed \
+    'codex surface readiness' tester-codex-ready
+  expect_success 'Codex prompt is sent only after its prompt surface appears' \
+    test "$(grep -c '^agent-read:' "$state/order" || true)" -ge 3 \
+      -a "$(grep -c '^prompt$' "$state/order" || true)" -eq 1
+
+  state=$tmp_root/dispatch-start-codex-surface-never
+  expect_rejection 'dispatch rejects a false-positive Codex idle state' \
+    dispatch_start "$state" tester task-codex-false run-codex-false codex \
+    "$dispatch_cwd" right 1000 codex_surface_never \
+    'false Codex readiness' tester-codex-false
+  expect_success 'false-positive Codex readiness never prompts' \
+    test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-start-get-timeout
+  expect_rejection_contains 'dispatch wall-clock timeout terminates a hung Herdr get' \
+    'dispatch exceeded its wall-clock timeout' \
+    dispatch_start "$state" worker task-timeout run-timeout claude \
+    "$dispatch_cwd" right 1000 get_hang 'hung get' worker-timeout
+  expect_success 'hung Herdr get never reaches prompt' test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-start-get-term-ignoring
+  expect_rejection_contains 'dispatch hard-kills a TERM-ignoring Herdr get at the wall-clock deadline' \
+    'dispatch exceeded its wall-clock timeout' \
+    dispatch_start "$state" worker task-hard-timeout run-hard-timeout claude \
+    "$dispatch_cwd" right 1000 get_term_ignoring 'hung get' worker-hard-timeout
+  expect_success 'TERM-ignoring Herdr get never reaches prompt' \
+    test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-start-nul
+  expect_rejection 'dispatch rejects NUL-containing stdin without truncation' \
+    dispatch_start_with_nul "$state"
+  expect_success 'NUL stdin never reaches prompt' test ! -e "$state/prompt.argv"
+
+  oversized_prompt=$(head -c 131073 /dev/zero | tr '\0' x)
+  state=$tmp_root/dispatch-start-oversized-prompt
+  expect_rejection 'dispatch rejects oversized prompt before mutation' \
+    dispatch_start "$state" worker task-oversized run-oversized claude \
+    "$dispatch_cwd" right 120000 success "$oversized_prompt" worker-oversized
+  expect_success 'oversized prompt causes no lifecycle command' \
+    assert_no_dispatch_mutation "$state"
+
+  state=$tmp_root/dispatch-start-bootstrap-empty
+  expect_success 'dispatch start bootstraps an untagged controller pane' \
+    dispatch_start "$state" worker task-bootstrap run-bootstrap claude \
+    "$dispatch_cwd" right 120000 start_bootstrap_empty 'bootstrap prompt' worker-bootstrap
+
+  state=$tmp_root/dispatch-start-missing-child-tokens
+  expect_success 'dispatch start accepts a fresh Herdr pane with omitted tokens' \
+    dispatch_start "$state" worker task-missing-tokens run-missing-tokens claude \
+    "$dispatch_cwd" right 120000 start_missing_child_tokens \
+    'missing child tokens' worker-missing-tokens
+  expect_success 'missing child tokens are bound before start and prompt' \
+    test -e "$state/started" -a -e "$state/prompted"
+
+  for scenario in start_controller_wrong_run start_child_tokens \
+    start_partial_tokens start_invalid_tokens malformed_tokens \
+    start_invalid_existing_task start_invalid_existing_run; do
+    state=$tmp_root/dispatch-$scenario
+    expect_rejection "dispatch rejects $scenario before mutation" \
+      dispatch_start "$state" worker "task-$scenario" "run-$scenario" claude \
+      "$dispatch_cwd" right 120000 "$scenario" "$scenario" "worker-$scenario"
+    expect_success "$scenario has no topology mutation" assert_no_dispatch_mutation "$state"
+  done
+
+  lock_key=$(printf '%s' ctl | cksum | awk '{print $1}')
+  lock_dir=$hod_home/dispatch-locks/$lock_key.lock
+  expect_success 'successful dispatch releases its controller lock' \
+    test ! -d "$lock_dir"
+  mkdir -p -- "$lock_dir"
+  printf '%s\n' 'other-owner' >"$lock_dir/owner"
+  state=$tmp_root/dispatch-controller-lock
+  expect_rejection 'dispatch serializes concurrent operations for one controller' \
+    dispatch_start "$state" worker task-lock run-lock claude \
+    "$dispatch_cwd" right 1 success 'locked dispatch' worker-lock
+  expect_success 'contended dispatch performs no topology mutation' \
+    assert_no_dispatch_mutation "$state"
+  expect_success 'contended dispatch does not steal or remove another owner lock' \
+    test "$(<"$lock_dir/owner")" = other-owner
+  rm -f -- "$lock_dir/owner"
+  rmdir -- "$lock_dir"
+
+  state=$tmp_root/dispatch-start-advisor-arbitrary
+  expect_rejection 'advisor requires canonical selection and matching model' \
+    dispatch_start "$state" advisor task-advisor run-advisor claude \
+    "$dispatch_cwd" right 120000 success 'arbitrary advisor model' advisor-arbitrary \
+    __omit__ __omit__
+  expect_success 'arbitrary advisor model never prompts' test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-start-advisor-fable-codex
+  expect_rejection 'fable advisor requires claude kind' \
+    dispatch_start "$state" advisor task-advisor-fable run-advisor-fable codex \
+    "$dispatch_cwd" right 120000 success 'wrong fable kind' advisor-fable-codex \
+    fable fable
+  expect_success 'fable wrong kind has no topology mutation' assert_no_dispatch_mutation "$state"
+
+  state=$tmp_root/dispatch-start-advisor-sol-claude
+  expect_rejection 'gpt-5.6-sol advisor requires codex kind' \
+    dispatch_start "$state" advisor task-advisor-sol run-advisor-sol claude \
+    "$dispatch_cwd" right 120000 success 'wrong sol kind' advisor-sol-claude \
+    gpt-5.6-sol gpt-5.6-sol
+  expect_success 'gpt-5.6-sol wrong kind has no topology mutation' \
+    assert_no_dispatch_mutation "$state"
+
+  state=$tmp_root/dispatch-reviewer-resume
+  expect_rejection 'reviewer dispatch rejects a resumed Codex session' \
+    dispatch_start_with_native_mode resume "$state" reviewer \
+    task-reviewer-resume run-reviewer-resume codex "$dispatch_cwd" right 120000 \
+    success 'reviewer resume' reviewer-resume
+  expect_success 'reviewer resume rejection happens before mutation' \
+    assert_no_dispatch_mutation "$state"
+
+  state=$tmp_root/dispatch-tester-resume
+  expect_rejection 'tester dispatch rejects a resumed Claude session' \
+    dispatch_start_with_native_mode claude-resume "$state" tester \
+    task-tester-resume run-tester-resume claude "$dispatch_cwd" right 120000 \
+    success 'tester resume' tester-resume
+  expect_success 'tester resume rejection happens before mutation' \
+    assert_no_dispatch_mutation "$state"
+
+  state=$tmp_root/dispatch-advisor-dangerous
+  expect_rejection 'advisor dispatch rejects permission bypass flags' \
+    dispatch_start_with_native_mode dangerous "$state" advisor \
+    task-advisor-danger run-advisor-danger claude "$dispatch_cwd" right 120000 \
+    success 'advisor dangerous' advisor-danger --name fable fable
+  expect_success 'advisor bypass rejection happens before mutation' \
+    assert_no_dispatch_mutation "$state"
+
+  state=$tmp_root/dispatch-start-non-advisor-selection
+  expect_rejection 'non-advisor rejects advisor selection flags' \
+    dispatch_start "$state" worker task-non-advisor run-non-advisor claude \
+    "$dispatch_cwd" right 120000 success 'non-advisor flags' worker-selection \
+    fable fable
+  expect_success 'non-advisor selection causes no lifecycle command' \
+    assert_no_lifecycle_after_failure "$state"
+
+  while read -r role relation advisor_choice advisor_model; do
+    state=$tmp_root/dispatch-start-$role
+    prompt=$(printf 'Direct user %s\npreserve $HOME *' "$role")
+    expect_success "dispatch start succeeds for $role" \
+      dispatch_start "$state" "$role" "task-$role" "run-$role" claude \
+      "$dispatch_cwd" right 120000 success "$prompt" "agent-$role-1" \
+      --name "$advisor_choice" "$advisor_model"
+    expect_success "dispatch maps $role to $relation" \
+      python3 - "$state/report-2.argv" "$role" "$relation" <<'PY'
+import sys
+argv = open(sys.argv[1], "rb").read().split(b"\0")[:-1]
+role, relation = sys.argv[2:4]
+tokens = {}
+for index, value in enumerate(argv[:-1]):
+    if value == b"--token":
+        key, token_value = argv[index + 1].decode().split("=", 1)
+        tokens[key] = token_value
+assert tokens == {
+    "hod_role": role,
+    "hod_parent": "ctl",
+    "hod_relation": relation,
+    "hod_task": f"task-{role}",
+    "hod_run": f"run-{role}",
+}, tokens
+PY
+    if [[ "$role" == advisor ]]; then
+      expect_success 'advisor receipt records canonical selection and model' \
+        python3 - "$state/receipt.json" <<'PY'
+import json
+import sys
+receipt = json.load(open(sys.argv[1], encoding="utf-8"))
+assert receipt["advisor_choice"] == "fable", receipt
+assert receipt["requested_model"] == "fable", receipt
+assert receipt["runtime_model_verified"] is False, receipt
+PY
+    fi
+    if [[ "$role" == worker ]]; then
+      printf '%s\n' \
+        'get:ctl' 'report:ctl' 'get:ctl' 'split' \
+        'get:child-pane' 'report:child-pane' 'get:child-pane' 'start' \
+        'agent-get:agent-worker-1' 'get:child-pane' \
+        'report:child-pane' 'get:child-pane' 'get:child-pane' \
+        'agent-get:child-pane' 'get:child-pane' 'get:child-pane' \
+        'get:ctl' 'prompt' \
+        >"$state/order.expected"
+      expect_success 'dispatch start uses the guarded command order' \
+        cmp -s "$state/order.expected" "$state/order"
+      expect_success 'dispatch split targets the explicit controller pane' \
+        python3 - "$state/split.argv" "$dispatch_cwd" <<'PY'
+import sys
+argv = open(sys.argv[1], "rb").read().split(b"\0")[:-1]
+cwd = sys.argv[2].encode()
+assert argv == [
+    b"pane", b"split", b"ctl", b"--direction", b"right", b"--cwd", cwd,
+    b"--no-focus",
+], argv
+PY
+      expect_success 'dispatch start forwards native argv and stdin exactly' \
+        python3 - "$state/start.argv" "$state/prompt.argv" <<'PY'
+import sys
+start = open(sys.argv[1], "rb").read().split(b"\0")[:-1]
+prompt = open(sys.argv[2], "rb").read().split(b"\0")[:-1]
+assert start == [
+    b"agent", b"start", b"agent-worker-1", b"--kind", b"claude",
+    b"--pane", b"child-pane", b"--timeout", b"120000", b"--",
+    b"--model", b"worker-model", b"--native-value", b"value with spaces",
+], start
+assert prompt[0:2] == [b"agent", b"prompt"], prompt
+assert prompt[2] == b"agent-worker-1", prompt
+assert prompt[3] == b"Direct user worker\npreserve $HOME *", prompt
+assert prompt[4:] == [
+    b"--wait",
+    b"--until", b"working",
+    b"--until", b"blocked",
+    b"--until", b"done",
+    b"--until", b"idle",
+    b"--until", b"unknown",
+    b"--timeout", b"120000",
+], prompt
+PY
+      expect_success 'dispatch start returns an exact JSON receipt' \
+        python3 - "$state/receipt.json" <<'PY'
+import json
+import sys
+receipt = json.load(open(sys.argv[1], encoding="utf-8"))
+assert set(receipt) == {"pane_id", "name", "role", "relation", "task", "run"}, receipt
+assert receipt == {
+    "pane_id": "child-pane",
+    "name": "agent-worker-1",
+    "role": "worker",
+    "relation": "delegate",
+    "task": "task-worker",
+    "run": "run-worker",
+}, receipt
+PY
+    fi
+  done <<'EOF'
+worker delegate
+advisor consult fable fable
+reviewer verify
+tester verify
+EOF
+
+  state=$tmp_root/dispatch-start-busy
+  expect_success 'dispatch retries only exact agent_pane_busy once' \
+    dispatch_start "$state" worker task-busy run-busy claude \
+    "$dispatch_cwd" right 120000 busy_once 'busy prompt' worker-busy
+  expect_success 'dispatch busy retry is bounded to two starts' \
+    test "$(grep -c '^start$' "$state/order")" -eq 2
+
+  state=$tmp_root/dispatch-start-busy-always
+  expect_rejection 'dispatch bounds repeated agent_pane_busy retries' \
+    dispatch_start "$state" worker task-busy-always run-busy-always claude \
+    "$dispatch_cwd" right 120000 busy_always 'busy always' worker-busy-always
+  expect_success 'dispatch attempts agent_pane_busy at most ten times' \
+    test "$(grep -c '^start$' "$state/order")" -eq 10
+
+  state=$tmp_root/dispatch-start-message-contains-busy
+  expect_rejection 'dispatch does not retry a non-matching JSON error message' \
+    dispatch_start "$state" worker task-message-busy run-message-busy claude \
+    "$dispatch_cwd" right 120000 start_message_contains_busy 'message busy' worker-message-busy
+  expect_success 'non-matching JSON error message causes one start' \
+    test "$(grep -c '^start$' "$state/order")" -eq 1
+
+  state=$tmp_root/dispatch-invalid-role
+  expect_rejection 'dispatch rejects invalid role' \
+    dispatch_start "$state" planner task-valid run-valid claude \
+    "$dispatch_cwd" right 120000 success 'invalid role' planner-agent
+  expect_success 'invalid role causes no lifecycle command' \
+    assert_no_lifecycle_after_failure "$state"
+
+  state=$tmp_root/dispatch-invalid-task
+  expect_rejection 'dispatch rejects unsafe task' \
+    dispatch_start "$state" worker 'bad/task' run-valid claude \
+    "$dispatch_cwd" right 120000 success 'invalid task' worker-invalid-task
+  expect_success 'invalid task causes no lifecycle command' \
+    assert_no_lifecycle_after_failure "$state"
+
+  state=$tmp_root/dispatch-invalid-run
+  expect_rejection 'dispatch rejects unsafe run' \
+    dispatch_start "$state" worker task-valid 'bad/run' claude \
+    "$dispatch_cwd" right 120000 success 'invalid run' worker-invalid-run
+  expect_success 'invalid run causes no lifecycle command' \
+    assert_no_lifecycle_after_failure "$state"
+
+  state=$tmp_root/dispatch-missing-name
+  expect_rejection 'dispatch rejects missing agent name' \
+    dispatch_start "$state" worker task-name run-name claude \
+    "$dispatch_cwd" right 120000 success 'missing name'
+  expect_success 'missing agent name causes no lifecycle command' \
+    assert_no_lifecycle_after_failure "$state"
+
+  state=$tmp_root/dispatch-agent-alias
+  expect_rejection 'dispatch rejects ambiguous --agent alias' \
+    dispatch_start "$state" worker task-alias run-alias claude \
+    "$dispatch_cwd" right 120000 success 'agent alias' legacy-agent --agent
+  expect_success 'ambiguous --agent alias causes no lifecycle command' \
+    assert_no_lifecycle_after_failure "$state"
+
+  state=$tmp_root/dispatch-missing-capability
+  expect_rejection 'dispatch fails closed on missing capability' \
+    dispatch_start "$state" worker task-cap run-cap claude \
+    "$dispatch_cwd" right 120000 missing_capability 'missing capability' worker-cap
+  expect_success 'missing capability does not split, start, or prompt' \
+    assert_no_lifecycle_after_failure "$state"
+
+  state=$tmp_root/dispatch-report-failure
+  expect_rejection 'dispatch fails closed on controller report failure' \
+    dispatch_start "$state" worker task-report run-report claude \
+    "$dispatch_cwd" right 120000 report_fail 'report failure' worker-report
+  expect_success 'report failure does not split, start, or prompt' \
+    assert_no_lifecycle_after_failure "$state"
+
+  for scenario in split_failure split_bad_json split_same_controller wrong_workspace \
+    wrong_parent wrong_run readback_fail child_report_fail child_report_close_fail \
+    cleanup_agent_claimed get_fail; do
+    state=$tmp_root/dispatch-$scenario
+    expect_rejection "dispatch fails closed on $scenario" \
+      dispatch_start "$state" worker "task-$scenario" "run-$scenario" claude \
+      "$dispatch_cwd" right 120000 "$scenario" "$scenario" worker-$scenario
+    expect_success "$scenario does not start or prompt" \
+      assert_no_lifecycle_after_failure "$state"
+    case "$scenario" in
+      wrong_parent|wrong_run|child_report_fail|child_report_close_fail)
+        expect_success "$scenario closes only the freshly split unstarted child" \
+          test -e "$state/close.argv"
+        expect_success "$scenario cleanup targets the exact returned child" \
+          python3 - "$state/close.argv" <<'PY'
+import sys
+argv = open(sys.argv[1], "rb").read().split(b"\0")[:-1]
+assert argv == [b"pane", b"close", b"child-pane"], argv
+PY
+        ;;
+      *)
+        expect_success "$scenario never closes an unproven pane" \
+          test ! -e "$state/close.argv"
+        ;;
+    esac
+  done
+
+  state=$tmp_root/dispatch-cleanup_agent_claimed
+  expect_success 'cleanup does not close a freshly split pane claimed by another agent' \
+    test ! -e "$state/close.argv"
+
+  state=$tmp_root/dispatch-cleanup_get_term_ignoring
+  cleanup_started=$SECONDS
+  expect_rejection_contains 'cleanup deadline kills a TERM-ignoring Herdr readback' \
+    'cleanup could not re-read freshly split pane' \
+    dispatch_start "$state" worker task-cleanup-deadline run-cleanup-deadline claude \
+    "$dispatch_cwd" right 120000 cleanup_get_term_ignoring \
+    'cleanup deadline' worker-cleanup-deadline
+  cleanup_elapsed=$((SECONDS - cleanup_started))
+  expect_success 'cleanup deadline bounds the complete failure cleanup path' \
+    test "$cleanup_elapsed" -ge 3 -a "$cleanup_elapsed" -lt 8
+  expect_success 'cleanup deadline never reaches agent start or prompt' \
+    test ! -e "$state/start.argv" -a ! -e "$state/prompt.argv"
+  cleanup_lock_key=$(printf '%s' ctl | cksum | awk '{print $1}')
+  expect_success 'cleanup deadline always releases the controller lock' \
+    test ! -d "$hod_home/dispatch-locks/$cleanup_lock_key.lock"
+
+  state=$tmp_root/dispatch-cleanup_early_expiry
+  cleanup_started=$SECONDS
+  expect_rejection 'cleanup launch race fails closed' \
+    dispatch_start "$state" worker task-cleanup-race run-cleanup-race claude \
+    "$dispatch_cwd" right 120000 cleanup_early_expiry \
+    'cleanup launch race' worker-cleanup-race
+  cleanup_elapsed=$((SECONDS - cleanup_started))
+  expect_success 'cleanup launch race is bounded and never starts an agent' \
+    test "$cleanup_elapsed" -lt 4 -a ! -e "$state/start.argv" -a ! -e "$state/prompt.argv"
+  expect_success 'cleanup launch race releases the controller lock' \
+    test ! -d "$hod_home/dispatch-locks/$cleanup_lock_key.lock"
+
+  for scenario in split_failure split_bad_json child_report_fail cleanup_agent_claimed; do
+    state=$tmp_root/dispatch-$scenario
+    expect_success "$scenario restores the previous controller task" \
+      grep -qxF 'hod_task=original-task' "$state/ctl.tokens"
+  done
+
+  state=$tmp_root/dispatch-rollback-controller-session-drift
+  expect_rejection 'rollback refuses a replaced controller session' \
+    dispatch_start "$state" worker task-rollback-owner run-rollback-owner claude \
+    "$dispatch_cwd" right 120000 rollback_controller_session_drift \
+    'rollback owner drift' worker-rollback-owner
+  expect_success 'replaced controller receives no rollback metadata write' \
+    test "$(<"$state/report-count")" -eq 1
+  expect_success 'replaced controller keeps the last transaction metadata for manual recovery' \
+    grep -qxF 'hod_task=task-rollback-owner' "$state/ctl.tokens"
+  expect_success 'controller replacement never reaches child agent lifecycle' \
+    test ! -e "$state/start.argv" -a ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-start-failure
+  expect_rejection 'dispatch fails closed on agent start failure' \
+    dispatch_start "$state" worker task-start run-start claude \
+    "$dispatch_cwd" right 120000 start_fail 'start failure' worker-start
+  expect_success 'start failure does not prompt' \
+    test ! -e "$state/prompt.argv"
+  expect_success 'start failure never closes a pane after start was attempted' \
+    test ! -e "$state/close.argv"
+
+  state=$tmp_root/dispatch-post-start-mismatch
+  expect_rejection 'dispatch fails closed on post-start metadata mismatch' \
+    dispatch_start "$state" worker task-post run-post claude \
+    "$dispatch_cwd" right 120000 post_start_mismatch 'post-start mismatch' worker-post
+  expect_success 'post-start mismatch does not prompt' \
+    test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-prompt-failure
+  expect_rejection 'dispatch fails closed on prompt failure' \
+    dispatch_start "$state" worker task-prompt run-prompt claude \
+    "$dispatch_cwd" right 120000 prompt_fail 'prompt failure' worker-prompt
+
+  state=$tmp_root/dispatch-prompt-blocked
+  expect_success 'dispatch succeeds when Herdr observes blocked immediately' \
+    dispatch_start "$state" worker task-blocked run-blocked claude \
+    "$dispatch_cwd" right 120000 prompt_blocked 'prompt blocked' worker-blocked
+  expect_success 'blocked prompt records delivery' \
+    test -e "$state/prompt.argv"
+
+  while read -r role relation; do
+    [[ "$role" == advisor ]] && continue
+    state=$tmp_root/dispatch-prompt-$role
+    expect_success "dispatch prompt validates and refreshes $role" \
+      dispatch_prompt "$state" redirect-task run-redirect "$role" success \
+      "redirect $role"
+    printf '%s\n' \
+      'get:ctl' 'get:child-pane' 'get:child-pane' 'get:child-pane' \
+      'agent-get:child-pane' 'get:child-pane' 'report:ctl' 'get:ctl' \
+      'report:child-pane' 'get:child-pane' 'get:child-pane' \
+      'agent-get:child-pane' 'get:child-pane' 'get:child-pane' \
+      'get:ctl' 'prompt' \
+      >"$state/order.expected"
+    expect_success "dispatch prompt command order for $role" \
+      cmp -s "$state/order.expected" "$state/order"
+    expect_success "dispatch prompt sends exactly one prompt for $role" \
+      test "$(grep -c '^prompt$' "$state/order")" -eq 1
+  done <<'EOF'
+worker delegate
+advisor consult
+reviewer verify
+tester verify
+EOF
+
+  for scenario in wrong_prompt_identity malformed_prompt_exit0 forged_prompt_exit0 \
+    stale_prompt_seq prompt_missing_session prompt_stalled; do
+    state=$tmp_root/dispatch-prompt-$scenario
+    expect_rejection "dispatch prompt rejects $scenario" \
+      dispatch_prompt "$state" redirect-task run-redirect worker "$scenario" \
+      "$scenario"
+    expect_success "$scenario attempts exactly one prompt" \
+      test "$(grep -c '^prompt$' "$state/order" 2>/dev/null || true)" -eq 1
+  done
+
+  state=$tmp_root/dispatch-prompt-final-workspace-race
+  expect_success 'validated delivery receipt is not turned into a retryable post-prompt failure' \
+    dispatch_prompt "$state" redirect-task run-redirect worker final_workspace_race \
+    'final workspace race'
+  expect_success 'final workspace race submits exactly one prompt' \
+    test "$(grep -c '^prompt$' "$state/order" 2>/dev/null || true)" -eq 1
+
+  for scenario in working_child stale_controller prompt_agent_working \
+    prompt_agent_not_ready prompt_invalid_child_task; do
+    state=$tmp_root/dispatch-prompt-$scenario
+    expect_rejection "dispatch prompt rejects $scenario" \
+      dispatch_prompt "$state" redirect-task run-redirect worker "$scenario" \
+      "$scenario"
+    expect_success "$scenario has no report or prompt" assert_no_report_or_prompt "$state"
+  done
+
+  state=$tmp_root/dispatch-prompt-advisor
+  expect_rejection 'advisor redirect requires a fresh consult' \
+    dispatch_prompt "$state" redirect-task run-redirect advisor success \
+    'advisor redirect'
+  expect_success 'advisor redirect has no report or prompt' assert_no_report_or_prompt "$state"
+
+  for scenario in prompt_kind_drift prompt_identity_drift prompt_session_drift \
+    prompt_terminal_drift prompt_state_drift; do
+    state=$tmp_root/dispatch-prompt-$scenario
+    expect_rejection "dispatch prompt rejects $scenario" \
+      dispatch_prompt "$state" redirect-task run-redirect worker "$scenario" \
+      "$scenario"
+    expect_success "$scenario never prompts a changed agent" \
+      test ! -e "$state/prompt.argv"
+  done
+  state=$tmp_root/dispatch-prompt-prompt_kind_drift
+  expect_success 'rejected redirect restores the controller task' \
+    grep -qxF 'hod_task=old-controller-task' "$state/ctl.tokens"
+  expect_success 'rejected redirect restores the child task' \
+    grep -qxF 'hod_task=old-task' "$state/child-pane.tokens"
+
+  state=$tmp_root/dispatch-prompt-prompt_session_drift
+  expect_success 'rollback refuses metadata writes to a replaced child session' \
+    grep -qxF 'hod_task=redirect-task' "$state/child-pane.tokens"
+  expect_success 'child replacement still permits exact controller rollback' \
+    grep -qxF 'hod_task=old-controller-task' "$state/ctl.tokens"
+  expect_success 'replaced child receives no rollback report' \
+    test "$(<"$state/report-count")" -eq 3
+
+  state=$tmp_root/dispatch-prompt-controller-workspace-drift
+  expect_rejection 'dispatch prompt rejects controller workspace drift' \
+    dispatch_prompt "$state" redirect-task run-redirect worker \
+    prompt_controller_workspace_drift 'workspace drift'
+  expect_success 'controller workspace drift never prompts' test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-prompt-controller-session-drift
+  expect_rejection 'dispatch prompt rejects controller session replacement' \
+    dispatch_prompt "$state" redirect-task run-redirect worker \
+    prompt_controller_session_drift 'controller session drift'
+  expect_success 'controller session replacement never prompts the child' \
+    test ! -e "$state/prompt.argv"
+
+  expect_rejection 'dispatch prompt requires an explicit expected kind' \
+    "$hod" dispatch prompt --pane child-pane --task redirect-task \
+    --run run-redirect --timeout 120000
+
+  for scenario in prompt_wrong_parent prompt_wrong_relation prompt_wrong_run prompt_readback_fail get_fail; do
+    state=$tmp_root/dispatch-$scenario
+    expect_rejection "dispatch prompt rejects $scenario" \
+      dispatch_prompt "$state" redirect-task run-redirect worker "$scenario" \
+      "$scenario"
+    expect_success "$scenario does not report or prompt" \
+      assert_no_report_or_prompt "$state"
+    if [[ "$scenario" == prompt_readback_fail ]]; then
+      expect_success 'prompt_readback_fail emits malformed pane-get JSON' \
+        test -e "$state/malformed-readback"
+    fi
+  done
+
+  state=$tmp_root/dispatch-prompt-report-failure
+  expect_rejection 'dispatch prompt fails closed on report failure' \
+    dispatch_prompt "$state" redirect-task run-redirect worker report_fail \
+    'redirect report failure'
+  expect_success 'prompt report failure does not prompt' \
+    test ! -e "$state/prompt.argv"
+
+  state=$tmp_root/dispatch-prompt-delivery-failure
+  expect_rejection 'dispatch prompt fails closed on delivery failure' \
+    dispatch_prompt "$state" redirect-task run-redirect worker prompt_fail \
+    'redirect delivery failure'
+
+  state=$tmp_root/dispatch-prompt-relation-option
+  expect_rejection 'dispatch prompt rejects free-form relation' \
+    dispatch_prompt "$state" redirect-task run-redirect worker success \
+    'free-form relation' --relation verify
+  expect_success 'free-form relation causes no lifecycle command' \
+    test ! -e "$state/order"
+}
+
+run_dispatch_regressions
+
+if [[ "${HOD_TEST_DISPATCH_ONLY:-0}" == 1 ]]; then
+  printf '\n%d passed, %d failed\n' "$pass" "$fail_count"
+  if (( fail_count > 0 )); then
+    printf 'failed: %s\n' "${failures[@]}" >&2
+    exit 1
+  fi
+  exit 0
+fi
 # Test-only E0 snapshot primitive. It deliberately stays out of bin/hod: the
 # adaptive protocol is documentation, not a new public evidence CLI.
 capture_e0_pass() {
