@@ -125,15 +125,16 @@ keys. See the full
 [local HOD UI console guide](usage-guide.md#local-hod-ui-console) for the
 settings matrix, write checks, and recovery details.
 
-For the global runtime-only view from any directory:
+For the global runtime-only view from any directory, running detached:
 
 ```bash
-hod start [--port <0-65535>] [--no-open]
+hod start [--port <0-65535>] [--no-open] [--background]
 ```
 
 `hod start --project <path>` is rejected. Settings selects a live project/space
 by workspace ID; the server resolves its current checkout without exposing a
-path to the browser and fails closed on missing or ambiguous targets. Confirmed
+path to the browser and fails closed on missing or ambiguous targets. The
+default port is fixed at `4317` unless `--port` overrides it. Confirmed
 settings mutations are available, while agent control remains disabled. The
 existing `hod ui` and `hod ui --project` commands are unchanged.
 

@@ -404,15 +404,31 @@ needs a fresh console launch.
 Use the directory-independent observer from any working directory:
 
 ```bash
-hod start [--port <0-65535>] [--no-open]
+hod start [--port <0-65535>] [--no-open] [--background]
+hod stop [--force] [--timeout <ms>]
 ```
 
-`hod start --project <path>` is rejected. `hod start` is foreground,
-loopback-only, and independent of the launch directory. It does not start or
-control Herdr agents. Its Settings view selects a current Herdr project/space by
-workspace ID and supports confirmed settings mutations; the server resolves the
-authoritative checkout without exposing project paths to the browser. The
-existing `hod ui` and `hod ui --project` commands remain unchanged.
+`hod start --project <path>` is rejected. `hod start` is detached by default,
+loopback-only, and independent of the launch directory. It uses fixed port
+`4317` unless `--port` overrides it. It does not
+start or control Herdr agents. Its Settings view selects a current Herdr
+project/space by workspace ID and supports confirmed settings mutations; the
+server resolves the authoritative checkout without exposing project paths to
+the browser. The existing `hod ui` and `hod ui --project` commands remain
+unchanged.
+
+`--background` is retained as a compatibility flag; `hod start` already forks
+the process, writes `$HOD_HOME/run/start.pid` and a
+redacted `$HOD_HOME/run/start.log` (mode `700` directory), and returns
+immediately without holding the terminal. No tray or menu-bar icon is
+created — it stays a headless background process. A `--background` call
+while one is already running reports the existing PID instead of spawning a
+second one. `hod stop` sends `SIGTERM`, polls for up to `--timeout` (default
+`10000`ms), and only sends `SIGKILL` with `--force`; it is idempotent when
+nothing is running, refuses a symlinked PID/log file, and never removes a PID
+file that a newer `hod start --background` has since overwritten. The log
+filter strips the one-time `#token` fragment and other credential-shaped
+`key=value` pairs from both stdout and stderr before they reach disk.
 
 ### Local-only boundary
 

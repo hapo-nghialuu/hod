@@ -10,12 +10,13 @@ adapters, or kill pane processes merely to test a theory.
 Run the runtime-only observer from any directory with:
 
 ```bash
-hod start [--port <0-65535>] [--no-open]
+hod start [--port <0-65535>] [--no-open] [--background]
 ```
 
 `hod start --project <path>` is intentionally rejected. Use `hod ui` or
 `hod ui --project <path>` for the unchanged legacy/project-scoped console.
-The observer is runtime-only: its read-only transcript and all-space counts
+The observer is runtime-only and detached by default on fixed port `4317` (or
+the explicit `--port` value): its read-only transcript and all-space counts
 (spaces, agents, working, blocked, idle, done) do not depend on the launch
 directory. Settings selects a live project/space by workspace ID; the server
 resolves the target without exposing project paths to the browser. Settings
@@ -99,8 +100,9 @@ not a fully fail-closed guarantee.
 
 ### Port conflict
 
-The default `--port 0` lets the OS choose a free port. If an explicit port is
-busy, either omit `--port` or choose another integer from `0` through `65535`:
+`hod ui` defaults to `--port 0`, letting the OS choose a free port. `hod start`
+defaults to fixed port `4317`. If the selected port is busy, choose another
+integer from `0` through `65535`:
 
 ```bash
 hod ui --port 0

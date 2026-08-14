@@ -5,6 +5,7 @@ import { statSync } from 'node:fs';
 // the caller, and structured errors never embed user input.
 
 export const DEFAULT_PORT = 0;
+export const DEFAULT_RUNTIME_ONLY_PORT = 4317;
 export const MIN_PORT = 0;
 export const MAX_PORT = 65535;
 
@@ -60,7 +61,7 @@ function assertExistingDirectory(path) {
 }
 
 /**
- * Parse runtime options for `hod ui`.
+ * Parse runtime options for `hod ui` and the internal runtime-only observer.
  *
  * @param {string[]} argv arguments after `ui` (may be empty)
  * @param {object} [env] process.env-like lookup for HOD_BIN defaults
@@ -71,7 +72,7 @@ export function parseRuntimeOptions(argv = [], env = {}) {
   const seen = new Set();
   const runtimeOnly = argv.includes('--runtime-only');
   let project;
-  let port = DEFAULT_PORT;
+  let port = runtimeOnly ? DEFAULT_RUNTIME_ONLY_PORT : DEFAULT_PORT;
   let open = true;
   let hodBin;
   let i = 0;
@@ -114,6 +115,18 @@ export function parseRuntimeOptions(argv = [], env = {}) {
       if (seen.has('--hod-bin')) throw duplicateFlagError('--hod-bin');
       seen.add('--hod-bin');
       hodBin = takeValue('--hod-bin');
+    } else if (arg === '--hod-owner-marker') {
+      // Internal-only: `hod start --background` stamps a per-launch marker
+      // here so it stays visible in `ps -ww`'s full command line. That lets
+      // the CLI prove a pid it is about to signal is a process it actually
+      // started, instead of trusting a bare, possibly-reused pid number. The
+      // value carries no secret and this parser does not act on it — it only
+      // needs to be accepted so the runtime does not fail to start. Public
+      // `hod ui`/`hod start` argv parsing in bin/hod rejects this flag from a
+      // user; only the launcher itself ever appends it.
+      if (seen.has('--hod-owner-marker')) throw duplicateFlagError('--hod-owner-marker');
+      seen.add('--hod-owner-marker');
+      takeValue('--hod-owner-marker');
     } else {
       throw unknownFlagError(arg);
     }

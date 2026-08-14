@@ -135,6 +135,16 @@ expect_output_success() {
   fi
 }
 
+test_sha256_text() {
+  local text=$1
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$text" | shasum -a 256 | cut -d ' ' -f 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$text" | sha256sum | cut -d ' ' -f 1
+  else
+    return 1
+  fi
+}
 check_hod_topology_contract() {
   python3 - "$repo_dir/SKILL.md" "$repo_dir/references/operations.md" <<'PY'
 import re
@@ -2813,6 +2823,341 @@ expect_output_contains 'version reports 0.1.16' 'hod 0.1.16' "$hod" version
 expect_success 'no-args prints usage' "$hod"
 
 # ---------------------------------------------------------------------------
+# prompt-safe and harvest use an isolated Herdr stub
+# ---------------------------------------------------------------------------
+herdr_stub=$tmp_root/herdr-stub
+herdr_call_log=$tmp_root/herdr-call.log
+herdr_stall_state=$tmp_root/herdr-stall-state
+herdr_prompt_start=$tmp_root/herdr-prompt-start
+herdr_prompt_release=$tmp_root/herdr-prompt-release
+cat >"$herdr_stub" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+command=${1:-}
+subcommand=${2:-}
+printf '%s\n' "$*" >>"${HOD_TEST_CALL_LOG:?}"
+case "$command $subcommand" in
+  'agent list')
+    list_json=${HOD_TEST_LIST_JSON:-}
+    [[ -n "$list_json" ]] || list_json='{"agents":[]}'
+    printf '%s\n' "$list_json"
+    ;;
+  'agent prompt')
+    [[ $# -eq 7 && "$5" == --wait && "$6" == --timeout && "$7" =~ ^[0-9]+$ ]] || {
+      printf 'unexpected prompt args: %s\n' "$*" >&2
+      exit 2
+    }
+    if [[ "${HOD_TEST_PROMPT_MODE:-success}" == fail ]]; then
+      printf 'prompt failed\n' >&2
+      exit 1
+    fi
+    if [[ "${HOD_TEST_PROMPT_MODE:-success}" == stall ]]; then
+      printf 'agent_prompt_stalled\n'
+      exit 1
+    fi
+    if [[ "${HOD_TEST_PROMPT_MODE:-success}" == slow ]]; then
+      : >"${HOD_TEST_PROMPT_START_MARKER:?}"
+      while [[ ! -e "${HOD_TEST_PROMPT_RELEASE_MARKER:?}" ]]; do
+        sleep 0.05
+      done
+    fi
+    printf 'prompt sent\n'
+    ;;
+  'agent send-keys')
+    [[ $# -eq 4 && "$3" == "${HOD_TEST_STALL_TARGET:?}" && "$4" == enter ]] || {
+      printf 'unexpected send-keys args: %s\n' "$*" >&2
+      exit 2
+    }
+    if [[ "${HOD_TEST_SEND_KEYS_MODE:-success}" == fail ]]; then
+      printf 'send-keys failed\n' >&2
+      exit 1
+    fi
+    if [[ "${HOD_TEST_SEND_KEYS_MODE:-success}" != no-transition ]]; then
+      # Recovery state changes only after the exact Enter action succeeds.
+      printf 'working\n' >"${HOD_TEST_STALL_STATE_FILE:?}"
+    fi
+    printf 'send-keys accepted\n'
+    ;;
+  'agent get')
+    [[ $# -eq 3 ]] || {
+      printf 'unexpected get args: %s\n' "$*" >&2
+      exit 2
+    }
+    if [[ "$3" == "${HOD_TEST_STALL_TARGET:-}" ]]; then
+      printf '{"result":{"agent":{"agent_status":"%s"}}}\n' \
+        "$(<"${HOD_TEST_STALL_STATE_FILE:?}")"
+    else
+      get_json=${HOD_TEST_GET_JSON:-}
+      [[ -n "$get_json" ]] || get_json='{"agent_status":"idle"}'
+      printf '%s\n' "$get_json"
+    fi
+    ;;
+  'agent read')
+    [[ $# -eq 7 && "$4" == --source && "$5" == recent-unwrapped && \
+      "$6" == --lines && "$7" =~ ^[0-9]+$ ]] || {
+      printf 'unexpected read args: %s\n' "$*" >&2
+      exit 2
+    }
+    if [[ "${HOD_TEST_READ_MODE:-success}" == fail ]]; then
+      printf 'read failed\n' >&2
+      exit 1
+    fi
+    printf '%s\n' "${HOD_TEST_READ_OUTPUT:-harvested output}"
+    ;;
+  *)
+    printf 'unexpected stub command: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac
+EOF
+chmod +x "$herdr_stub"
+export HOD_HERDR_BIN=$herdr_stub
+export HOD_TEST_CALL_LOG=$herdr_call_log
+export HOD_TEST_STALL_STATE_FILE=$herdr_stall_state
+export HOD_TEST_PROMPT_START_MARKER=$herdr_prompt_start
+export HOD_TEST_PROMPT_RELEASE_MARKER=$herdr_prompt_release
+export HOD_TEST_STALL_TARGET=stall-agent
+export HOD_TEST_LIST_JSON='{"result":{"agents":[{"name":"working-agent","pane_id":"pane-working","agent_status":"working"},{"name":"safe-agent","pane_id":"pane-safe","agent_status":"idle"},{"name":"stall-agent","pane_id":"pane-stall","agent_status":"idle"},{"name":"harvest-agent","pane_id":"pane-harvest","agent_status":"idle"}]}}'
+export HOD_TEST_PROMPT_MODE=success
+export HOD_TEST_GET_JSON='{"result":{"agent":{"agent_status":"working"}}}'
+export HOD_TEST_READ_MODE=success
+export HOD_TEST_READ_OUTPUT='harvested output from stub'
+printf 'idle\n' >"$herdr_stall_state"
+: >"$herdr_call_log"
+
+expect_rejection 'prompt-safe rejects a target absent from live agents' \
+  "$hod" prompt-safe missing-agent 'hello'
+
+ambiguous_out=$tmp_root/ambiguous.out
+export HOD_TEST_LIST_JSON='{"result":{"agents":[{"name":"ambiguous-agent","pane_id":"pane-a","agent_status":"idle"},{"name":"ambiguous-agent","pane_id":"pane-b","agent_status":"idle"}]}}'
+set +e
+"$hod" prompt-safe ambiguous-agent 'hello' >"$ambiguous_out" 2>&1
+ambiguous_rc=$?
+set -e
+if [[ $ambiguous_rc -ne 0 ]] && \
+   grep -qF -- 'expected exactly one' "$ambiguous_out" && \
+   grep -qF -- 'pane-a' "$ambiguous_out" && \
+   grep -qF -- 'pane-b' "$ambiguous_out"; then
+  record 'prompt-safe rejects ambiguous target and lists matches' true
+else
+  printf '  ambiguous rc=%s output:\n%s\n' "$ambiguous_rc" "$(cat "$ambiguous_out")" >&2
+  record 'prompt-safe rejects ambiguous target and lists matches' false
+fi
+export HOD_TEST_LIST_JSON='{"result":{"agents":[{"name":"working-agent","pane_id":"pane-working","agent_status":"working"},{"name":"safe-agent","pane_id":"pane-safe","agent_status":"idle"},{"name":"stall-agent","pane_id":"pane-stall","agent_status":"idle"},{"name":"harvest-agent","pane_id":"pane-harvest","agent_status":"idle"}]}}'
+
+expect_rejection 'prompt-safe rejects a working agent without force' \
+  "$hod" prompt-safe working-agent 'work'
+expect_success 'prompt-safe sends to a working agent with force' \
+  "$hod" prompt-safe working-agent 'work' --force --timeout 1234
+expect_success 'prompt-safe resolves a target by pane_id' \
+  "$hod" prompt-safe pane-safe 'by pane id'
+expect_success 'prompt-safe sends resolved pane_id target' \
+  grep -qxF -- 'agent prompt pane-safe by pane id --wait --timeout 45000' "$herdr_call_log"
+expect_success 'prompt args include target text wait and timeout' \
+  grep -qxF -- 'agent prompt working-agent work --wait --timeout 1234' "$herdr_call_log"
+
+expect_success 'prompt-safe sends the first prompt' \
+  "$hod" prompt-safe safe-agent 'same text'
+expect_rejection 'prompt-safe rejects a duplicate prompt within 10 minutes' \
+  "$hod" prompt-safe safe-agent 'same text'
+expect_success 'prompt lock is cleaned after duplicate rejection' \
+  test ! -e "$hod_home/state/prompt-safe.lock"
+force_prompt_count_before=$(grep -cF -- 'agent prompt safe-agent same text --wait --timeout 45000' "$herdr_call_log" || true)
+expect_success 'prompt-safe sends a duplicate with force' \
+  "$hod" prompt-safe safe-agent 'same text' --force
+force_prompt_count_after=$(grep -cF -- 'agent prompt safe-agent same text --wait --timeout 45000' "$herdr_call_log" || true)
+if [[ "$force_prompt_count_after" -eq $((force_prompt_count_before + 1)) ]]; then
+  record 'prompt-safe --force calls Herdr for duplicate' true
+else
+  record 'prompt-safe --force calls Herdr for duplicate' false
+fi
+
+hash_file=$hod_home/state/prompt-hashes
+rm -f -- "$hash_file"
+export HOD_TEST_PROMPT_MODE=fail
+expect_rejection 'prompt-safe prompt failure is rejected' \
+  "$hod" prompt-safe safe-agent 'failed prompt'
+expect_success 'prompt-safe prompt failure does not record hash' \
+  test ! -e "$hash_file"
+export HOD_TEST_PROMPT_MODE=success
+
+old_prompt_hash=$(test_sha256_text 'safe-agent old prompt')
+old_prompt_timestamp=$(( $(date +%s) - 601 ))
+printf '%s %s\n' "$old_prompt_hash" "$old_prompt_timestamp" >"$hash_file"
+expect_success 'prompt-safe sends duplicate hash older than 10 minutes' \
+  "$hod" prompt-safe safe-agent 'old prompt'
+expect_success 'old duplicate prompt reached Herdr' \
+  grep -qF -- 'agent prompt safe-agent old prompt --wait --timeout 45000' "$herdr_call_log"
+
+: >"$hash_file"
+for ((line_number = 1; line_number <= 25; line_number++)); do
+  printf 'old-hash-%02d 1\n' "$line_number" >>"$hash_file"
+done
+expect_success 'prompt-safe appends hash record' \
+  "$hod" prompt-safe safe-agent 'twentieth-line prompt'
+record_line_count=$(wc -l <"$hash_file")
+if [[ "$record_line_count" -eq 20 ]]; then
+  record 'prompt hash record keeps exactly 20 lines' true
+else
+  printf '  prompt hash line count: %s\n' "$record_line_count" >&2
+  record 'prompt hash record keeps exactly 20 lines' false
+fi
+
+# A dead owner can be reclaimed only after ps confirms it is absent.
+(exit 0) & stale_pid=$!
+wait "$stale_pid"
+stale_lock=$hod_home/state/prompt-safe.lock
+mkdir -p -- "$stale_lock"
+printf '%s\n' "$stale_pid" >"$stale_lock/pid"
+expect_success 'prompt-safe reclaims stale dead-PID lock' \
+  "$hod" prompt-safe safe-agent 'reclaim dead lock'
+expect_success 'reclaimed stale lock leaves no sentinel' \
+  test ! -e "$stale_lock"
+
+mkdir -p -- "$stale_lock"
+printf '%s\n' "$$" >"$stale_lock/pid"
+expect_rejection 'prompt-safe keeps live-PID lock' \
+  "$hod" prompt-safe safe-agent 'live lock'
+if [[ -f "$stale_lock/pid" ]]; then
+  record 'live-PID lock remains intact' true
+else
+  record 'live-PID lock remains intact' false
+fi
+rm -f -- "$stale_lock/pid"
+rmdir -- "$stale_lock"
+
+mkdir -p -- "$stale_lock"
+printf '%s\n' "$stale_pid" >"$stale_lock/pid"
+sentinel=$stale_lock/sentinel
+printf 'keep me\n' >"$sentinel"
+expect_rejection 'prompt-safe keeps lock with extra file' \
+  "$hod" prompt-safe safe-agent 'extra lock file'
+if [[ -f "$stale_lock/pid" && -f "$sentinel" ]]; then
+  record 'extra lock file is not deleted' true
+else
+  record 'extra lock file is not deleted' false
+fi
+rm -f -- "$stale_lock/pid" "$sentinel"
+rmdir -- "$stale_lock"
+
+# Two processes must serialize duplicate check, send, and hash recording. The
+# first prompt holds the lock at a marker; the second must fail before sending.
+race_prompt_start=$herdr_prompt_start-race
+race_prompt_release=$herdr_prompt_release-race
+rm -f -- "$race_prompt_start" "$race_prompt_release"
+export HOD_TEST_PROMPT_MODE=slow
+export HOD_TEST_PROMPT_START_MARKER=$race_prompt_start
+export HOD_TEST_PROMPT_RELEASE_MARKER=$race_prompt_release
+race_one_out=$tmp_root/race-one.out
+race_two_out=$tmp_root/race-two.out
+set +e
+"$hod" prompt-safe safe-agent 'race text' >"$race_one_out" 2>&1 &
+race_one_pid=$!
+set -e
+race_ready=false
+for attempt in $(seq 1 100); do
+  if [[ -f "$race_prompt_start" ]]; then
+    race_ready=true
+    break
+  fi
+  sleep 0.05
+done
+race_two_pid=''
+race_two_rc=99
+if [[ "$race_ready" == true ]]; then
+  set +e
+  "$hod" prompt-safe safe-agent 'race text' >"$race_two_out" 2>&1 &
+  race_two_pid=$!
+  set -e
+fi
+: >"$race_prompt_release"
+set +e
+wait "$race_one_pid"
+race_one_rc=$?
+if [[ -n "$race_two_pid" ]]; then
+  wait "$race_two_pid"
+  race_two_rc=$?
+fi
+set -e
+race_prompt_count=$(grep -cF -- 'agent prompt safe-agent race text --wait --timeout 45000' "$herdr_call_log" || true)
+if [[ "$race_ready" == true && $race_one_rc -eq 0 && $race_two_rc -ne 0 && \
+      "$race_prompt_count" == 1 ]] && \
+   [[ ! -e "$hod_home/state/prompt-safe.lock" ]]; then
+  record 'prompt-safe duplicate guard serializes concurrent sends' true
+else
+  printf '  race ready=%s first_rc=%s second_rc=%s prompt_count=%s\n' \
+    "$race_ready" "$race_one_rc" "$race_two_rc" "$race_prompt_count" >&2
+  printf '  first output: %s\n' "$(cat "$race_one_out" 2>/dev/null || true)" >&2
+  printf '  second output: %s\n' "$(cat "$race_two_out" 2>/dev/null || true)" >&2
+  record 'prompt-safe duplicate guard serializes concurrent sends' false
+fi
+export HOD_TEST_PROMPT_MODE=success
+
+export HOD_TEST_PROMPT_MODE=stall
+export HOD_TEST_LIST_JSON='{"result":{"agents":[{"name":"stall-agent","pane_id":"pane-stall","agent_status":"blocked"}]}}'
+printf 'blocked\n' >"$herdr_stall_state"
+export HOD_TEST_SEND_KEYS_MODE=no-transition
+expect_rejection 'stall recovery rejects unchanged blocked state after successful Enter' \
+  "$hod" prompt-safe stall-agent 'blocked unchanged'
+
+export HOD_TEST_LIST_JSON='{"result":{"agents":[{"name":"stall-agent","pane_id":"pane-stall","agent_status":"working"}]}}'
+printf 'working\n' >"$herdr_stall_state"
+expect_rejection 'stall recovery rejects unchanged working state after successful Enter' \
+  "$hod" prompt-safe stall-agent 'working unchanged' --force
+
+export HOD_TEST_LIST_JSON='{"result":{"agents":[{"name":"working-agent","pane_id":"pane-working","agent_status":"working"},{"name":"safe-agent","pane_id":"pane-safe","agent_status":"idle"},{"name":"stall-agent","pane_id":"pane-stall","agent_status":"idle"},{"name":"harvest-agent","pane_id":"pane-harvest","agent_status":"idle"}]}}'
+printf 'idle\n' >"$herdr_stall_state"
+export HOD_TEST_SEND_KEYS_MODE=success
+expect_success 'prompt-safe recovers a stalled prompt' \
+  "$hod" prompt-safe stall-agent 'recover me'
+expect_success 'stall recovery sends target Enter' \
+  grep -qxF -- 'agent send-keys stall-agent enter' "$herdr_call_log"
+printf 'idle\n' >"$herdr_stall_state"
+export HOD_TEST_SEND_KEYS_MODE=fail
+expect_rejection 'stalled prompt with failed Enter stays rejected' \
+  "$hod" prompt-safe stall-agent 'recover failed'
+expect_success 'prompt lock is cleaned after failed recovery' \
+  test ! -e "$hod_home/state/prompt-safe.lock"
+export HOD_TEST_SEND_KEYS_MODE=success
+export HOD_TEST_PROMPT_MODE=success
+
+harvest_output=$tmp_root/harvest-path
+if harvest_output=$("$hod" harvest harvest-agent --lines 37 2>/dev/null) && \
+   [[ -f "$harvest_output" ]] && \
+   grep -qxF -- 'harvested output from stub' "$harvest_output" && \
+   [[ "$(basename -- "$harvest_output")" == *-harvest-agent.txt ]] && \
+   grep -qxF -- 'agent read harvest-agent --source recent-unwrapped --lines 37' "$herdr_call_log"; then
+  record 'harvest writes bounded output to a sanitized timestamped path' true
+else
+  printf '  harvest path: %s\n' "$harvest_output" >&2
+  record 'harvest writes bounded output to a sanitized timestamped path' false
+fi
+
+harvest_before=$tmp_root/harvest-before.txt
+harvest_after=$tmp_root/harvest-after.txt
+harvest_failure_out=$tmp_root/harvest-failure.out
+find "$hod_home/harvest" -type f -print | sort >"$harvest_before"
+export HOD_TEST_READ_MODE=fail
+set +e
+"$hod" harvest harvest-agent >"$harvest_failure_out" 2>&1
+harvest_failure_rc=$?
+set -e
+find "$hod_home/harvest" -type f -print | sort >"$harvest_after"
+harvest_temp_files=$(find "$hod_home/harvest" -type f -name '.harvest*' -print -quit)
+export HOD_TEST_READ_MODE=success
+if [[ $harvest_failure_rc -ne 0 ]] && cmp -s "$harvest_before" "$harvest_after" && \
+   [[ -z "$harvest_temp_files" ]]; then
+  record 'harvest read failure exits 1 without temporary or artifact files' true
+else
+  printf '  harvest failure rc=%s output:\n%s\n' "$harvest_failure_rc" "$(cat "$harvest_failure_out")" >&2
+  printf '  files before:\n%s\n' "$(cat "$harvest_before")" >&2
+  printf '  files after:\n%s\n' "$(cat "$harvest_after")" >&2
+  record 'harvest read failure exits 1 without temporary or artifact files' false
+fi
+
+expect_rejection 'harvest rejects a target absent from live agents' \
+  "$hod" harvest missing-agent
 # ui launcher: isolated Node gate, argv forwarding, and entry safety
 # ---------------------------------------------------------------------------
 ui_fixture_root=$tmp_root/ui-launcher
@@ -2830,7 +3175,16 @@ if [[ "${1:-}" == --version ]]; then
   exit 0
 fi
 
-printf '%s\0' "$@" >"${FAKE_NODE_ARGV:?}"
+filtered_argv=()
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == --hod-owner-marker ]]; then
+    shift 2
+    continue
+  fi
+  filtered_argv+=("$1")
+  shift
+done
+printf '%s\0' "${filtered_argv[@]}" >"${FAKE_NODE_ARGV:?}"
 exit "${FAKE_NODE_EXIT:-0}"
 EOF
 chmod +x "$fake_node"
@@ -2870,7 +3224,8 @@ run_fake_start() {
   local node_exit=$3
   shift 3
 
-  env \
+  local rc
+  if env \
     HOME="$ui_home" \
     HOD_HOME="$hod_home" \
     HOD_BIN_DIR="$bin_dir" \
@@ -2881,7 +3236,19 @@ run_fake_start() {
     FAKE_NODE_ARGV="$argv_file" \
     FAKE_NODE_VERSION="$node_version" \
     FAKE_NODE_EXIT="$node_exit" \
-    "$hod" start "$@"
+    "$hod" start "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+
+  if (( rc == 0 )); then
+    for _ in {1..100}; do
+      [[ -e "$argv_file" ]] && break
+      sleep 0.01
+    done
+  fi
+  return "$rc"
 }
 
 run_fake_start_from() {
@@ -3022,10 +3389,19 @@ start_cwd_b=$tmp_root/start-cwd-b
 mkdir -p -- "$start_cwd_a" "$start_cwd_b"
 start_log_a=$tmp_root/start-a.log
 start_log_b=$tmp_root/start-b.log
+start_log_default=$tmp_root/start-default.log
 start_expected_a=$tmp_root/start-a.expected
 start_expected_b=$tmp_root/start-b.expected
+start_expected_default=$tmp_root/start-default.expected
 
-expect_success 'start launches from an unrelated first cwd' \
+expect_success 'start defaults to detached mode from an unrelated cwd' \
+  run_fake_start_from "$start_cwd_a" "$start_log_default" v20.0.0 0 --no-open
+printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
+  --no-open --runtime-only >"$start_expected_default"
+expect_success 'start default forwards runtime-only argv' \
+  cmp -s "$start_expected_default" "$start_log_default"
+
+expect_success 'start launches with an explicit port from an unrelated cwd' \
   run_fake_start_from "$start_cwd_a" "$start_log_a" v20.0.0 0 --port 0 --no-open
 printf '%s\0' "$skill_dir/ui/server.mjs" --hod-bin "$hod" \
   --port 0 --no-open --runtime-only >"$start_expected_a"
@@ -3045,6 +3421,190 @@ expect_rejection 'start rejects --project before Node or project validation' \
   --project "$tmp_root/project-does-not-exist"
 expect_success 'start --project does not invoke the Node entry' \
   test ! -e "$start_project_log"
+
+# ---------------------------------------------------------------------------
+# start / stop: real detached lifecycle, PID/log/lock, no tray
+# ---------------------------------------------------------------------------
+bg_node_dir=$tmp_root/bg-node/bin
+mkdir -p -- "$bg_node_dir"
+bg_node=$bg_node_dir/node
+bg_token=supersecrettokenvalue123456
+cat >"$bg_node" <<EOF
+#!/usr/bin/env bash
+set -uo pipefail
+
+if [[ "\${1:-}" == --version ]]; then
+  printf '%s\n' "\${FAKE_NODE_VERSION:-v20.0.0}"
+  exit 0
+fi
+
+printf 'http://127.0.0.1:%s/#token=%s\n' "\${FAKE_BG_PORT:-0}" "$bg_token"
+
+if [[ "\${FAKE_BG_IGNORE_TERM:-false}" == true ]]; then
+  trap '' TERM
+fi
+
+while :; do
+  sleep 0.2
+done
+EOF
+chmod +x "$bg_node"
+
+run_bg() {
+  env \
+    HOME="$ui_home" \
+    HOD_HOME="$hod_home" \
+    HOD_BIN_DIR="$bin_dir" \
+    HOD_CLAUDE_DIR="$claude_dir" \
+    HOD_AGENTS_DIR="$agents_dir" \
+    HOD_REPO_URL="$src_repo" \
+    PATH="$bg_node_dir:$PATH" \
+    "$hod" "$@"
+}
+
+# Bounded, portable stand-in for GNU `timeout` (absent on stock macOS): race a
+# watchdog against the real command so a regression that blocks forever fails
+# the suite instead of hanging it.
+run_bounded() {
+  local limit=$1
+  shift
+  "$@" &
+  local cmd_pid=$! watchdog_pid rc=0
+  ( sleep "$limit"; kill -TERM "$cmd_pid" 2>/dev/null || true ) &
+  watchdog_pid=$!
+  wait "$cmd_pid" 2>/dev/null || rc=$?
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  return "$rc"
+}
+
+bg_pid_file=$hod_home/run/start.pid
+bg_log_file=$hod_home/run/start.log
+bg_lock_dir=$hod_home/run/start.lock
+
+log_lacks_token() {
+  ! grep -q "$bg_token" "$1"
+}
+
+rm -rf -- "$hod_home/run"
+expect_success 'start returns without blocking (bounded 5s)' \
+  run_bounded 5 run_bg start --no-open
+expect_success 'start writes a pid file' \
+  test -f "$bg_pid_file"
+
+read -r bg_pid _ <"$bg_pid_file"
+expect_success 'start --background pid is a real live process' \
+  kill -0 "$bg_pid"
+run_dir_mode=$(stat -f '%Lp' "$hod_home/run" 2>/dev/null || stat -c '%a' "$hod_home/run" 2>/dev/null)
+expect_success 'start creates run/ with mode 700' \
+  test "$run_dir_mode" = 700
+expect_success 'start log never contains the raw one-time token' \
+  log_lacks_token "$bg_log_file"
+expect_success 'start log keeps a redacted marker in place of the fragment' \
+  grep -qF '#[REDACTED]' "$bg_log_file"
+
+first_bg_pid=$bg_pid
+expect_output_contains 'a second start reports already running' \
+  'already running' run_bg start --background --no-open
+read -r bg_pid _ <"$bg_pid_file"
+expect_success 'a second start does not spawn a duplicate process' \
+  test "$bg_pid" = "$first_bg_pid"
+
+expect_output_contains 'stop terminates the background process' \
+  'stopped' run_bg stop
+expect_success 'stop removes the pid file' \
+  test ! -e "$bg_pid_file"
+expect_rejection 'stopped background pid is no longer alive' \
+  kill -0 "$first_bg_pid"
+
+expect_output_contains 'stop is idempotent when nothing is running' \
+  'not running' run_bg stop
+
+# A plausible, definitely-dead pid: spawn a trivial process and let it exit,
+# instead of an out-of-range number — `ps -p` on some platforms answers an
+# absurd pid with an error message rather than empty output, which the
+# fail-closed liveness check correctly treats as ambiguous, not confirmed
+# dead. That is the liveness check doing its job, not a stale-pid bug.
+( : ) & dead_pid=$!
+wait "$dead_pid" 2>/dev/null || true
+printf '%s\n' "$dead_pid" >"$bg_pid_file"
+expect_output_contains 'stop cleans up a stale pid file' \
+  'not running' run_bg stop
+expect_success 'stop removed the stale pid file' \
+  test ! -e "$bg_pid_file"
+
+# A live but foreign pid (no hod-owned command line) must never be signaled:
+# a bare pid number can be reused by an unrelated process, and `hod stop`
+# must fail closed instead of killing whatever now holds that number.
+rm -rf -- "$hod_home/run"
+mkdir -p -m 700 -- "$hod_home/run"
+sleep 60 & foreign_pid=$!
+disown "$foreign_pid" 2>/dev/null || true
+printf '%s\n' "$foreign_pid" >"$bg_pid_file"
+expect_rejection 'stop refuses a live pid with no ownership marker' \
+  run_bg stop
+expect_success 'the unrelated foreign process is still alive' \
+  kill -0 "$foreign_pid"
+expect_success 'the pid file for the foreign process is untouched' \
+  test -f "$bg_pid_file"
+read -r foreign_pid_after _ <"$bg_pid_file"
+expect_success 'the untouched pid file still names the foreign pid' \
+  test "$foreign_pid_after" = "$foreign_pid"
+kill -KILL "$foreign_pid" 2>/dev/null || true
+wait "$foreign_pid" 2>/dev/null || true
+rm -f -- "$bg_pid_file"
+
+rm -rf -- "$hod_home/run"
+mkdir -p -m 700 -- "$hod_home/run"
+ln -s -- /nonexistent-target "$bg_pid_file"
+expect_rejection 'start refuses a symlinked pid file' \
+  run_bg start --no-open
+expect_rejection 'stop refuses a symlinked pid file' \
+  run_bg stop
+rm -f -- "$bg_pid_file"
+
+rm -rf -- "$hod_home/run"
+mkdir -p -m 700 -- "$hod_home/run"
+ln -s -- /nonexistent-target "$bg_log_file"
+expect_rejection 'start refuses a symlinked log file' \
+  run_bg start --no-open
+rm -f -- "$bg_log_file"
+
+rm -rf -- "$hod_home/run"
+FAKE_BG_IGNORE_TERM=true run_bg start --no-open >/dev/null
+read -r term_ignoring_pid _ <"$bg_pid_file"
+expect_rejection 'stop without --force fails against a SIGTERM-ignoring process' \
+  run_bg stop --timeout 500
+expect_success 'the SIGTERM-ignoring process is still alive after the timeout' \
+  kill -0 "$term_ignoring_pid"
+expect_output_contains 'stop --force kills a SIGTERM-ignoring process' \
+  'stopped' run_bg stop --force --timeout 500
+expect_rejection 'force-stopped process is no longer alive' \
+  kill -0 "$term_ignoring_pid"
+expect_success 'stop --force removed the pid file' \
+  test ! -e "$bg_pid_file"
+
+rm -rf -- "$hod_home/run"
+( run_bg start --no-open >"$tmp_root/bg-race-a.out" 2>&1 ) &
+race_a_pid=$!
+( run_bg start --no-open >"$tmp_root/bg-race-b.out" 2>&1 ) &
+race_b_pid=$!
+# One side may legitimately lose the start.lock and exit non-zero (fail-
+# closed, not a graceful wait/retry) — under `set -e` a bare `wait` on that
+# exit status would abort the whole suite, so both are tolerated here; the
+# assertions below are what actually prove no duplicate/corrupted state.
+wait "$race_a_pid" 2>/dev/null || true
+wait "$race_b_pid" 2>/dev/null || true
+expect_success 'a start race leaves exactly one pid file' \
+  test -f "$bg_pid_file"
+read -r race_pid _ <"$bg_pid_file"
+race_live_count=$(pgrep -f "$bg_node.*--no-open --runtime-only" 2>/dev/null | wc -l | tr -d ' ')
+expect_success 'a start race spawns exactly one live process' \
+  test "$race_live_count" = 1
+run_bg stop >/dev/null 2>&1 || true
+
+# Leave no fake background process or state behind for later test groups.
+rm -rf -- "$hod_home/run"
 
 # ---------------------------------------------------------------------------
 # summary

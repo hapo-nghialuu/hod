@@ -4,7 +4,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { parseRuntimeOptions, DEFAULT_PORT, MIN_PORT, MAX_PORT } from '../server/runtime-options.mjs';
+import {
+  parseRuntimeOptions,
+  DEFAULT_PORT,
+  DEFAULT_RUNTIME_ONLY_PORT,
+  MIN_PORT,
+  MAX_PORT,
+} from '../server/runtime-options.mjs';
 
 function tempDir() {
   const dir = mkdtempSync(join(tmpdir(), 'hod-rt-options-'));
@@ -106,6 +112,26 @@ test('--hod-bin accepts a value and falls back to env HOD_BIN', () => {
   assert.equal(parseRuntimeOptions(['--hod-bin', '/x'], { HOD_BIN: '/env' }).hodBin, '/x');
 });
 
+test('--hod-owner-marker is accepted and consumed without appearing in options', () => {
+  assert.deepEqual(parseRuntimeOptions(['--hod-owner-marker', 'hod-runtime-123']), {
+    project: undefined, port: DEFAULT_PORT, open: true, hodBin: undefined,
+  });
+});
+
+test('--hod-owner-marker without a value rejects', () => {
+  assert.throws(
+    () => parseRuntimeOptions(['--hod-owner-marker']),
+    (err) => err.code === 'ERR_USAGE' && /requires a value/.test(err.message),
+  );
+});
+
+test('--hod-owner-marker duplicate rejects', () => {
+  assert.throws(
+    () => parseRuntimeOptions(['--hod-owner-marker', 'a', '--hod-owner-marker', 'b']),
+    (err) => err.code === 'ERR_USAGE' && /duplicate option: --hod-owner-marker/.test(err.message),
+  );
+});
+
 test('runtime-only parsing accepts only the internal selector plus read-only launch options', () => {
   assert.deepEqual(parseRuntimeOptions([
     '--runtime-only', '--port', '4317', '--no-open', '--hod-bin', '/x/hod',
@@ -116,6 +142,11 @@ test('runtime-only parsing accepts only the internal selector plus read-only lau
     () => parseRuntimeOptions(['--runtime-only', '--runtime-only']),
     (err) => err.code === 'ERR_USAGE' && /duplicate option/.test(err.message),
   );
+});
+
+test('runtime-only defaults to the fixed observer port without changing hod ui', () => {
+  assert.equal(parseRuntimeOptions(['--runtime-only']).port, DEFAULT_RUNTIME_ONLY_PORT);
+  assert.equal(parseRuntimeOptions([]).port, DEFAULT_PORT);
 });
 
 test('runtime-only rejects --project before validating or reading its value', () => {

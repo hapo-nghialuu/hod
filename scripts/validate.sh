@@ -38,7 +38,7 @@ if len(description) > 1024:
 
 missing = []
 for markdown in sorted(root.rglob("*.md")):
-    if ".git" in markdown.parts or "plans" in markdown.parts or ".claude" in markdown.parts or ".agents" in markdown.parts:
+    if ".git" in markdown.parts or "plans" in markdown.parts or ".claude" in markdown.parts or ".agents" in markdown.parts or ".codex" in markdown.parts:
         continue
     text = markdown.read_text(encoding="utf-8")
     for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):

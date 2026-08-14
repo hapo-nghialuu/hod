@@ -249,15 +249,16 @@ path-swap boundary, read [Local HOD UI console](usage-guide.md#local-hod-ui-cons
 
 ### Global runtime-only observer
 
-To observe every Herdr workspace from any directory, start the foreground
-observer instead:
+To observe every Herdr workspace from any directory, start the detached
+observer:
 
 ```bash
-hod start [--port <0-65535>] [--no-open]
+hod start [--port <0-65535>] [--no-open] [--background]
 ```
 
 `hod start --project <path>` is rejected and the observer ignores the current
-directory. Its dashboard shows all-space totals for spaces, agents, working,
+directory. It uses fixed port `4317` unless `--port` overrides it, and
+`--background` is retained for compatibility. Its dashboard shows all-space totals for spaces, agents, working,
 blocked, idle, and done; the selected transcript is a read-only, RAM-only
 display. Settings selects a live project/space by workspace ID, while the server
 resolves the current checkout without exposing its path to the browser. Missing
