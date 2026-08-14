@@ -159,9 +159,12 @@ Start and redirect are serialized by an atomic per-controller lock. HOD never
 steals a stale lock. A freshly split pane is closed only when its authoritative
 split receipt matched the controller workspace and a failure happens before any
 agent-start attempt. Cleanup first re-reads the exact pane, workspace, canonical
-cwd, terminal, and empty agent/session identity; if another actor claimed or
-changed it, HOD fails closed and leaves it open. An unproven pane or any pane
-after start is never closed.
+cwd, terminal, and empty agent/session identity; a change visible at that read
+makes HOD fail closed and leave the pane open. Herdr 0.8 has no owner-CAS for
+the following close or metadata write, so an outside mutation in that final
+interval remains a race. Never mix raw lifecycle operations with an active HOD
+dispatch. HOD never intentionally closes an unproven pane or any pane after an
+agent-start attempt.
 
 The Herdr 0.8 prompt API does not expose a session-CAS argument. Therefore all
 coordinator lifecycle operations must use this serialized HOD path; never run a
@@ -256,7 +259,7 @@ For exact three-role promises, CLI flags, and enforcement gaps, see [Role Bounda
 
 - A spoken model name is a label, not an ID. Resolve the exact string from the installed CLI before starting. If the CLI rejects it, report its error verbatim and ask — never substitute, downgrade, or retry with a guess. When no model is named, omit the flag and let the CLI use its configured default.
 - A project profile (`.claude/settings.<role>.json`) only takes effect when passed at start. A worker started bare silently discards the user's configuration — treat that as a defect. Map each role to its matching profile; never invent, substitute, or author one. A boundary role (read-only reviewer, coordinator-only controller) started without a profile is enforced by wording alone — say so in the report.
-- Refuse contradictions instead of passing them: `--dangerously-skip-permissions` disables every deny rule loaded through `--settings`, and `--continue`/`--resume` on a reviewer defeats its independence. An enforced boundary is the same contract as a written one — never route around a denied tool by shelling out or handing the action to another agent. The sole exception is adaptive checkpoint metadata: when the normative reference requires it, only the active coordinator may use a local shell to write the one exact external checkpoint path. That narrow control-plane write never permits task-file, repository, or worker-artifact writes, and its path restriction is wording-level plus evidence-checked where the harness leaves shell access available.
+- Refuse contradictions instead of passing them: native bypass forms such as `--dangerously-skip-permissions` or `--permission-mode bypassPermissions` disable deny rules loaded through `--settings`, and resuming, forking, teleporting, or attaching an existing session for a reviewer defeats its independence. `hod dispatch start` rejects direct bypass forms and values in native argv for every role before mutation. Advisor, reviewer, and tester starts use a positive native-argument allowlist: no root subcommands, native cwd/system-prompt changes, inline settings/tool grants, non-read-only sandbox overrides, or arbitrary config/profile/approval overrides. Use file-based Claude settings, canonical Codex `-s read-only -c features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules. HOD does not inspect referenced settings or ambient CLI configuration; pass only inputs the user trusts. An enforced boundary is the same contract as a written one — never route around a denied tool by shelling out or handing the action to another agent. The sole exception is adaptive checkpoint metadata: when the normative reference requires it, only the active coordinator may use a local shell to write the one exact external checkpoint path. That narrow control-plane write never permits task-file, repository, or worker-artifact writes, and its path restriction is wording-level plus evidence-checked where the harness leaves shell access available.
 - Continue a live agent only when the task directly extends its work with the same role and file ownership. Start fresh for review or audit, for a changed role or ownership, or when information isolation matters — and never resume a transcript for a review step: a resumed reviewer looks independent and is not.
 
 ## Lifecycle and evidence

@@ -84,9 +84,16 @@ hod settings install        # writes .claude/settings.<role>.json profiles
 
 Start workers with `hod dispatch start ... -- --settings
 .claude/settings.reviewer.json`; the harness itself removes the tools that role
-must not have. Never
-combine a profile with `--dangerously-skip-permissions` — that flag disables
-every deny rule.
+must not have. Never combine a profile with a native permission bypass flag or
+mode, including `--dangerously-skip-permissions` and `--permission-mode
+bypassPermissions`; `hod dispatch start` rejects direct forms and values in
+native argv before mutation. It does not inspect referenced settings, profile,
+or config files, custom sandbox profiles, or ambient CLI configuration; pass
+only inputs you trust.
+Advisor, reviewer, and tester starts additionally use a positive native-arg
+allowlist: no root subcommands or native cwd/system-prompt changes. Use
+file-based Claude settings, Codex `-s read-only -c
+features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules.
 
 To have one orchestrator manage several projects at once, read
 [Portfolio orchestration](portfolio-orchestration.md) — this is where

@@ -202,8 +202,10 @@ for manual inspection rather than guessing its identity.
 
 If a verified pre-start bind fails after a split, HOD closes only that newly
 split child after re-reading the exact pane/workspace/cwd/terminal and confirming
-that no agent/session has claimed it. A claimed or changed pane is left open.
-It never guesses a pane from names or ordering, and never closes a pane after an
+that no agent/session has claimed it. A change visible at that read leaves the
+pane open. Herdr 0.8 has no owner-CAS for the following close, so do not run raw
+lifecycle operations concurrently with an active HOD dispatch. It never guesses
+a pane from names or ordering, and never intentionally closes a pane after an
 agent-start attempt. Prompt stdin above 131072 bytes fails before mutation.
 `--timeout` bounds the guarded path through delivery; failure cleanup has a
 separate hard three-second cap.

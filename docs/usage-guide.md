@@ -65,7 +65,13 @@ Advisor start additionally requires explicit matching
 `-m` or `--model`; `fable`/`opus` require `--kind claude`, while
 `gpt-5.6-sol` requires `--kind codex`; the receipt records
 `requested_model` and `runtime_model_verified=false`, not an observed runtime
-model. Without a user choice, use `HOLD + ASK_USER`, not a default. Herdr 0.8 start/get/prompt success requires
+model. Without a user choice, use `HOLD + ASK_USER`, not a default. Advisor,
+reviewer, and tester starts use a positive native-argument allowlist: no root
+subcommands, native cwd/system-prompt changes, inline tool grants, or
+non-read-only boundary overrides. Use file-based Claude settings, canonical
+Codex `-s read-only -c features.multi_agent=false`, or Grok `--sandbox
+read-only` plus deny rules. Referenced settings and ambient CLI configuration
+remain trusted user inputs rather than content HOD inspects. Herdr 0.8 start/get/prompt success requires
 the exact identity (including launch terminal), boolean readiness, an allowed
 `agent_status`, and an advancing safe `state_change_seq`; NUL-containing stdin
 and prompts above 131072 bytes are rejected before mutation. `--timeout` is an
@@ -104,10 +110,12 @@ expected kind, agent name, workspace, terminal identity, agent-session
 identity, and state sequence across its authoritative reads. A verified failure
 before any agent-start attempt closes only the freshly split child after an
 exact cleanup readback of pane/workspace/cwd/terminal and empty agent/session.
-If another actor has claimed or changed it, HOD leaves it open and fails closed.
-Pre-delivery failures restore staged metadata when possible; ambiguous lifecycle
-attempts are never auto-retried. HOD never closes an unproven or already-started
-pane.
+A change visible at that read makes HOD leave it open and fail closed. Herdr
+0.8 has no owner-CAS for the following close or metadata write, so an outside
+mutation in that final interval remains a race; never mix raw lifecycle
+operations with an active HOD dispatch. Pre-delivery failures restore staged
+metadata when possible; ambiguous lifecycle attempts are never auto-retried.
+HOD never intentionally closes an unproven or already-started pane.
 
 ## Adaptive coordinator (opt-in)
 

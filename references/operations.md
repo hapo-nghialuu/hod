@@ -404,9 +404,11 @@ requires an explicit expected kind and two unchanged authoritative reads of
 name, kind, terminal, agent session, workspace, and sequence. A freshly split
 child is closed on a verified pre-start bind failure only after cleanup re-reads
 the exact pane, workspace, canonical cwd, terminal, and empty agent/session
-identity. If another actor claimed or changed the pane, HOD leaves it open and
-fails closed. HOD never closes an unproven pane or a pane after an agent-start
-attempt.
+identity. A change visible at that read makes HOD leave the pane open and fail
+closed. Herdr 0.8 has no owner-CAS for the following close or metadata write,
+so an outside mutation in that final interval remains a race; never mix raw
+lifecycle operations with an active HOD dispatch. HOD never intentionally
+closes an unproven pane or a pane after an agent-start attempt.
 
 Herdr 0.8 does not expose session-CAS on `agent prompt`. The supported contract
 therefore requires every coordinator lifecycle operation to use the same HOD

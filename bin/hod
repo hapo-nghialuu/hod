@@ -1194,8 +1194,8 @@ cmd_settings_list() {
   printf '    -- -s workspace-write --ask-for-approval never \\\n'
   printf '    -c sandbox_workspace_write.network_access=true \\\n'
   printf '    -c '\''sandbox_workspace_write.writable_roots=["<abs-repo>/.git"]'\''\n'
-  printf '\nNever combine a profile with --dangerously-skip-permissions: that flag\n'
-  printf 'overrides every deny rule and the profile stops enforcing anything.\n'
+  printf '\nNever combine a profile with a native permission bypass flag or mode.\n'
+  printf 'They override deny rules, so hod dispatch rejects them before mutation.\n'
 }
 
 # Resolve the project the settings profiles are written into: an explicit
@@ -2570,21 +2570,177 @@ dispatch_validate_advisor_selection() {
   dispatch_validate_native_model "$model"
 }
 
-dispatch_validate_fresh_role_args() {
-  local role=$1 kind=$2 value
+dispatch_codex_boundary_config_is_safe() {
+  case $1 in
+    features.multi_agent=false|model=*|model_reasoning_effort=*|\
+    model_reasoning_summary=*|model_verbosity=*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+dispatch_validate_boundary_role_args() {
+  local role=$1 kind=$2 option value config index=0
+  local count=${#DISPATCH_NATIVE_ARGS[@]}
   [[ "$role" != worker ]] || return 0
-  for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
-    case $value in
-      resume|--continue|--continue=*|--resume|--resume=*|\
-      --dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo)
-        usage_error "$role dispatch requires a fresh, permission-bounded agent session"
+
+  while (( index < count )); do
+    option=${DISPATCH_NATIVE_ARGS[$index]}
+    case $kind in
+      claude)
+        case $option in
+          -m|--model|--settings|--effort|-n|--name|\
+          --disallowedTools|--disallowed-tools|--max-budget-usd)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            value=${DISPATCH_NATIVE_ARGS[$((index + 1))]}
+            [[ -n "$value" ]] || usage_error "$option requires a value"
+            if [[ "$option" == --settings && \
+              ( "$value" == *'{'* || "$value" == *'['* || "$value" == *\\* ) ]]; then
+              usage_error "$role dispatch requires file-based Claude settings"
+            fi
+            index=$((index + 2))
+            ;;
+          -m=*|--model=*|--effort=*|-n=*|--name=*|\
+          --disallowedTools=*|--disallowed-tools=*|--max-budget-usd=*)
+            index=$((index + 1))
+            ;;
+          --ax-screen-reader|--disable-slash-commands|\
+          --exclude-dynamic-system-prompt-sections|--no-chrome|\
+          --strict-mcp-config|--verbose)
+            index=$((index + 1))
+            ;;
+          *) usage_error "$role Claude dispatch rejects unsupported native argument: $option" ;;
+        esac
         ;;
-      -c|-r)
-        [[ "$kind" != claude ]] || \
-          usage_error "$role dispatch requires a fresh Claude session"
+      codex)
+        case $option in
+          -m|--model)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ -n "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" ]] || \
+              usage_error "$option requires a value"
+            index=$((index + 2))
+            ;;
+          -s|--sandbox)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" == read-only ]] || \
+              usage_error "$role Codex dispatch requires a read-only sandbox override"
+            index=$((index + 2))
+            ;;
+          -c|--config)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            config=${DISPATCH_NATIVE_ARGS[$((index + 1))]}
+            dispatch_codex_boundary_config_is_safe "$config" || \
+              usage_error "$role Codex dispatch forbids this config override"
+            index=$((index + 2))
+            ;;
+          -m=*|--model=*|-s=read-only|--sandbox=read-only)
+            index=$((index + 1))
+            ;;
+          -s=*|--sandbox=*)
+            usage_error "$role Codex dispatch requires a read-only sandbox override"
+            ;;
+          -c=*)
+            config=${option#-c=}
+            dispatch_codex_boundary_config_is_safe "$config" || \
+              usage_error "$role Codex dispatch forbids this config override"
+            index=$((index + 1))
+            ;;
+          --config=*)
+            config=${option#--config=}
+            dispatch_codex_boundary_config_is_safe "$config" || \
+              usage_error "$role Codex dispatch forbids this config override"
+            index=$((index + 1))
+            ;;
+          --no-alt-screen|--strict-config)
+            index=$((index + 1))
+            ;;
+          *) usage_error "$role Codex dispatch rejects unsupported native argument: $option" ;;
+        esac
+        ;;
+      grok)
+        case $option in
+          -m|--model|--reasoning-effort|--effort|--deny|\
+          --disallowed-tools|--max-turns)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ -n "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" ]] || \
+              usage_error "$option requires a value"
+            index=$((index + 2))
+            ;;
+          --sandbox)
+            (( index + 1 < count )) || usage_error "$option requires a value"
+            [[ "${DISPATCH_NATIVE_ARGS[$((index + 1))]}" == read-only ]] || \
+              usage_error "$role Grok dispatch requires a read-only sandbox override"
+            index=$((index + 2))
+            ;;
+          -m=*|--model=*|--reasoning-effort=*|--effort=*|--deny=*|\
+          --disallowed-tools=*|--max-turns=*|--sandbox=read-only|\
+          --disable-web-search|--no-memory|--no-plan|--no-subagents|\
+          --no-alt-screen|--minimal|--fullscreen|--verbatim)
+            index=$((index + 1))
+            ;;
+          --sandbox=*)
+            usage_error "$role Grok dispatch requires a read-only sandbox override"
+            ;;
+          *) usage_error "$role Grok dispatch rejects unsupported native argument: $option" ;;
+        esac
         ;;
     esac
   done
+}
+
+dispatch_validate_fresh_role_args() {
+  local role=$1 kind=$2 value previous=''
+  for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
+    if [[ "$kind" == claude && "$previous" == --settings && "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native settings"
+    fi
+    if [[ "$kind" == codex && ( "$previous" == -c || "$previous" == --config ) &&
+      "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native config"
+    fi
+    if [[ "$kind" == grok && "$previous" == --sandbox ]]; then
+      case $value in
+        off|none|disabled|unrestricted|danger-full-access)
+          usage_error "$role dispatch forbids native permission bypass arguments"
+          ;;
+      esac
+    fi
+    case $value in
+      --dangerously-*|--allow-dangerously-*|--always-approve|--always-approve=*|\
+      --yolo|--yolo=*|*bypassPermissions*|*danger-full-access*)
+        usage_error "$role dispatch forbids native permission bypass arguments"
+        ;;
+    esac
+    if [[ "$kind" == claude && "$value" == --settings=* && "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native settings"
+    fi
+    if [[ "$kind" == codex && ( "$value" == -c=* || "$value" == --config=* ) &&
+      "$value" == *\\* ]]; then
+      usage_error "$role dispatch forbids escaped inline native config"
+    fi
+    if [[ "$kind" == grok ]]; then
+      case $value in
+        --sandbox=off|--sandbox=none|--sandbox=disabled|\
+        --sandbox=unrestricted|--sandbox=danger-full-access)
+          usage_error "$role dispatch forbids native permission bypass arguments"
+          ;;
+      esac
+    fi
+    if [[ "$role" != worker ]]; then
+      case $value in
+        resume|fork|cloud|--continue|--continue=*|--resume|--resume=*|\
+        --from-pr|--from-pr=*|--teleport|--teleport=*|--cloud|--cloud=*|\
+        --fork-session|--fork-session=*)
+          usage_error "$role dispatch requires a fresh, permission-bounded agent session"
+          ;;
+        -c|-c=*|-r|-r=*)
+          [[ "$kind" != claude && "$kind" != grok ]] || \
+            usage_error "$role dispatch requires a fresh $kind session"
+          ;;
+      esac
+    fi
+    previous=$value
+  done
+  dispatch_validate_boundary_role_args "$role" "$kind"
 }
 
 cmd_dispatch_start() {

@@ -317,10 +317,13 @@ retrofit instructions already loaded in a running session.
 Dispatches for one coordinator are serialized. Redirect binds the expected
 kind plus unchanged terminal and agent-session identities; verified pre-start
 bind failures close only the newly split pane after an exact cleanup readback.
-If another actor has claimed or changed that pane, HOD leaves it open and fails
-closed. Pre-delivery failures restore staged metadata when Herdr accepts the
-rollback; ambiguous lifecycle attempts are never auto-retried. HOD never closes
-an unproven or already-started pane.
+A change visible at that read makes HOD leave the pane open and fail closed.
+Herdr 0.8 has no owner-CAS for the following close or metadata write, so an
+outside mutation in that final interval remains a race; never mix raw lifecycle
+operations with an active HOD dispatch. Pre-delivery failures restore staged
+metadata when Herdr accepts the rollback; ambiguous lifecycle attempts are
+never auto-retried. HOD never intentionally closes an unproven or
+already-started pane.
 
 ## The local HOD UI console
 
@@ -459,10 +462,23 @@ an independent reviewer.
 
 Two rules proven by live testing, not theory:
 
-- **Never combine a profile with `--dangerously-skip-permissions`** — that
-  flag overrides every deny rule and the profile stops enforcing anything.
-- **A reviewer is never a resumed session.** `--continue`/`--resume` restores
-  exactly the bias an independent review exists to remove.
+- **Never combine a profile with a native permission bypass flag or mode** —
+  forms such as `--dangerously-skip-permissions` or `--permission-mode
+  bypassPermissions` override deny rules. `hod dispatch start` rejects direct
+  bypass forms and values in native argv for every role before mutation. It
+  does not inspect referenced settings, profile, or config files, custom
+  sandbox profiles, or ambient CLI configuration; trust those inputs before
+  passing them.
+- **Boundary roles use a positive native-argument allowlist.** Advisor,
+  reviewer, and tester starts accept only documented model/effort and
+  read-only boundary forms. Root subcommands, native cwd/system-prompt changes,
+  inline Claude settings/tool grants, non-read-only sandbox overrides, and
+  arbitrary Codex config/profile or approval overrides fail before mutation.
+  Use file-based Claude settings, canonical Codex `-s read-only -c
+  features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules.
+- **A reviewer is never a resumed session.** Resume, fork, PR, teleport, and
+  cloud-session forms restore exactly the bias an independent review exists
+  to remove, so guarded boundary roles reject them.
 
 Profiles carry permission boundaries only — never credentials. Claude Code
 merges them over the settings it already loads, so tokens, endpoints, and
@@ -533,7 +549,7 @@ herdr-orchestrator/
 ├── bin/hod                     # the CLI — install, doctor, settings, update
 ├── install.sh                  # curl | sh bootstrap (HOD_REF pins a version)
 ├── scripts/
-│   ├── test-hod.sh             # 142 hermetic CLI tests
+│   ├── test-hod.sh             # 522 hermetic CLI tests
 │   └── validate.sh             # syntax + frontmatter + markdown links
 ├── templates/                  # policy template + role permission profiles
 ├── docs/                       # human guides
@@ -697,7 +713,7 @@ internal sub-agents — no Herdr involved.
 | Skill never activates | The request did not name it | Say both "Herdr" and "herdr-orchestrator" |
 | Sidebar shows no state for an agent | No integration installed for that kind | `herdr integration install <kind>` — e.g. `herdr integration install grok`. Install only the ones matching CLIs you use |
 | `hod: command not found` | `~/.local/bin` is not on `PATH` | Add the export line `hod` printed, open a new terminal |
-| A role profile is not enforcing | `--dangerously-skip-permissions` was also passed | Drop that flag — it overrides every deny rule |
+| A role profile is not enforcing | A raw start used a native permission bypass flag or mode | Drop the bypass, or use `hod dispatch start`, which rejects it before mutation |
 | Worker seems stuck | It may be blocked, not dead | Read its pane; if it is waiting on a decision, answer through the controller |
 | `hod update` refuses | The skill checkout has local edits | `cd ~/.hod/skill && git status`, then commit, stash, or discard |
 

@@ -304,10 +304,13 @@ nạp instruction mới — HOD không thể retrofit instruction đã nạp tro
 
 Các dispatch của cùng coordinator được serialize. Redirect bind expected kind,
 terminal identity và agent-session identity không đổi; lỗi bind pre-start chỉ
-đóng pane vừa split sau readback cleanup chính xác. Nếu tác nhân khác đã claim
-hoặc đổi pane, HOD để pane mở và fail-closed. Lỗi pre-delivery rollback metadata
-đã stage khi Herdr chấp nhận; lifecycle attempt mơ hồ không được auto-retry.
-HOD không đóng pane chưa chứng minh ownership hoặc đã start agent.
+đóng pane vừa split sau readback cleanup chính xác. Thay đổi đã nhìn thấy ở
+readback đó làm HOD để pane mở và fail-closed. Herdr 0.8 không có owner-CAS cho
+lệnh close hoặc metadata write kế tiếp, nên mutation bên ngoài trong khoảng
+cuối này vẫn là race; không trộn raw lifecycle operation với HOD dispatch đang
+chạy. Lỗi pre-delivery rollback metadata đã stage khi Herdr chấp nhận;
+lifecycle attempt mơ hồ không được auto-retry. HOD không chủ ý đóng pane chưa
+chứng minh ownership hoặc đã start agent.
 
 ## Console UI cục bộ của HOD
 
@@ -441,10 +444,23 @@ reviewer độc lập.
 
 Hai luật được chứng minh bằng test thật, không phải lý thuyết:
 
-- **Không bao giờ kết hợp profile với `--dangerously-skip-permissions`** —
-  cờ đó ghi đè mọi luật `deny`, profile lập tức mất hết tác dụng.
-- **Reviewer không bao giờ là session resume.** `--continue`/`--resume` khôi
-  phục đúng cái thiên kiến mà review độc lập sinh ra để loại bỏ.
+- **Không bao giờ kết hợp profile với native permission-bypass flag hoặc
+  mode** — các dạng như `--dangerously-skip-permissions` hoặc
+  `--permission-mode bypassPermissions` ghi đè luật `deny`. `hod dispatch
+  start` từ chối các dạng và giá trị bypass trực tiếp trong native argv cho
+  mọi role trước mutation. HOD không đọc nội dung file settings, profile,
+  config được tham chiếu, custom sandbox profile hoặc cấu hình CLI từ môi
+  trường; chỉ truyền input đã tin cậy.
+- **Boundary role dùng positive allowlist cho native argument.** Start advisor,
+  reviewer và tester chỉ nhận model/effort cùng các dạng boundary read-only đã
+  document. Root subcommand, native cwd/system-prompt, inline Claude
+  settings/tool grant, sandbox không read-only, cùng Codex config/profile hoặc
+  approval override tùy ý đều fail trước mutation. Dùng Claude settings dạng
+  file, Codex canonical `-s read-only -c features.multi_agent=false`, hoặc Grok
+  `--sandbox read-only` kèm deny rule.
+- **Reviewer không bao giờ là session được khôi phục.** Các dạng resume, fork,
+  PR, teleport và cloud-session khôi phục đúng cái thiên kiến mà review độc
+  lập sinh ra để loại bỏ, nên guarded boundary role từ chối chúng.
 
 Profile chỉ chứa ranh giới quyền — không bao giờ chứa credential. Claude Code
 gộp profile lên các settings đã nạp sẵn, nên token, endpoint và hooks được kế
@@ -513,7 +529,7 @@ herdr-orchestrator/
 ├── bin/hod                     # CLI — install, doctor, settings, update
 ├── install.sh                  # bootstrap curl | sh (HOD_REF để ghim version)
 ├── scripts/
-│   ├── test-hod.sh             # 142 test hermetic cho CLI
+│   ├── test-hod.sh             # 522 test hermetic cho CLI
 │   └── validate.sh             # syntax + frontmatter + link markdown
 ├── templates/                  # policy mẫu + profile quyền theo vai
 ├── docs/                       # tài liệu cho người
@@ -677,7 +693,7 @@ chính nó — không liên quan gì tới Herdr.
 | Skill không kích hoạt | Yêu cầu không gọi tên nó | Nhắc cả "Herdr" lẫn "herdr-orchestrator" |
 | Sidebar không hiện trạng thái của một agent | Kind đó chưa có integration | `herdr integration install <kind>` — riêng Grok không có |
 | `hod: command not found` | `~/.local/bin` chưa nằm trong `PATH` | Thêm dòng export mà `hod` đã in ra, mở terminal mới |
-| Profile theo vai không chặn được gì | Có kèm `--dangerously-skip-permissions` | Bỏ cờ đó — nó ghi đè mọi luật deny |
+| Profile theo vai không chặn được gì | Raw start có native permission-bypass flag hoặc mode | Bỏ bypass, hoặc dùng `hod dispatch start`; lệnh này từ chối trước mutation |
 | Worker có vẻ đứng im | Có thể nó đang blocked chứ không chết | Đọc pane của nó; nếu đang chờ quyết định, trả lời qua controller |
 | `hod update` từ chối chạy | Checkout skill có sửa đổi cục bộ | `cd ~/.hod/skill && git status`, rồi commit, stash, hoặc bỏ |
 

@@ -878,8 +878,159 @@ EOF
       dangerous)
         start_args+=(-- --model "$native_model" --dangerously-skip-permissions)
         ;;
+      dangerous-equals)
+        start_args+=(-- --model "$native_model" --dangerously-skip-permissions=true)
+        ;;
+      allow-dangerous)
+        start_args+=(-- --model "$native_model" --allow-dangerously-skip-permissions)
+        ;;
+      codex-dangerous)
+        start_args+=(-- --model "$native_model" --dangerously-bypass-approvals-and-sandbox)
+        ;;
+      codex-hook-dangerous)
+        start_args+=(-- --model "$native_model" --dangerously-bypass-hook-trust)
+        ;;
+      yolo)
+        start_args+=(-- --model "$native_model" --yolo)
+        ;;
+      sandbox-danger-short)
+        start_args+=(-- --model "$native_model" -s danger-full-access)
+        ;;
+      sandbox-danger-long)
+        start_args+=(-- --model "$native_model" --sandbox danger-full-access)
+        ;;
+      sandbox-danger-equals)
+        start_args+=(-- --model "$native_model" --sandbox=danger-full-access)
+        ;;
+      permission-bypass)
+        start_args+=(-- --model "$native_model" --permission-mode bypassPermissions)
+        ;;
+      permission-bypass-equals)
+        start_args+=(-- --model "$native_model" --permission-mode=bypassPermissions)
+        ;;
+      config-sandbox-danger)
+        start_args+=(-- --model "$native_model" -c 'sandbox_mode="danger-full-access"')
+        ;;
+      config-sandbox-danger-escaped)
+        start_args+=(-- --model "$native_model" -c 'sandbox_mode="danger\u002dfull\u002daccess"')
+        ;;
+      inline-settings-bypass)
+        start_args+=(-- --model "$native_model" --settings '{"permissions":{"defaultMode":"bypassPermissions"}}')
+        ;;
+      inline-settings-bypass-escaped)
+        start_args+=(-- --model "$native_model" --settings '{"permissions":{"defaultMode":"bypass\u0050ermissions"}}')
+        ;;
+      always-approve)
+        start_args+=(-- --model "$native_model" --always-approve)
+        ;;
+      sandbox-off)
+        start_args+=(-- --model "$native_model" --sandbox off)
+        ;;
+      sandbox-none)
+        start_args+=(-- --model "$native_model" --sandbox none)
+        ;;
+      sandbox-off-equals)
+        start_args+=(-- --model "$native_model" --sandbox=off)
+        ;;
+      permission-accept-edits)
+        start_args+=(-- --model "$native_model" --permission-mode acceptEdits)
+        ;;
+      inline-settings-accept-edits)
+        start_args+=(-- --model "$native_model" --settings '{"permissions":{"defaultMode":"acceptEdits","deny":[]}}')
+        ;;
+      claude-allowed-tools)
+        start_args+=(-- --model "$native_model" --allowedTools Edit)
+        ;;
+      grok-allow)
+        start_args+=(-- --model "$native_model" --allow Edit)
+        ;;
+      grok-tools)
+        start_args+=(-- --model "$native_model" --tools Edit)
+        ;;
+      codex-sandbox-workspace)
+        start_args+=(-- --model "$native_model" -s workspace-write)
+        ;;
+      codex-config-sandbox)
+        start_args+=(-- --model "$native_model" -c 'sandbox_mode="read-only"')
+        ;;
+      codex-config-multi-agent)
+        start_args+=(-- --model "$native_model" -c features.multi_agent=true)
+        ;;
+      codex-profile)
+        start_args+=(-- --model "$native_model" --profile reviewer)
+        ;;
+      codex-approve)
+        start_args+=(-- --model "$native_model" --approve-for-me)
+        ;;
+      codex-add-dir)
+        start_args+=(-- --model "$native_model" --add-dir /tmp)
+        ;;
+      codex-search)
+        start_args+=(-- --model "$native_model" --search)
+        ;;
+      codex-oss)
+        start_args+=(-- --model "$native_model" --oss)
+        ;;
+      cloud-command)
+        start_args+=(-- cloud)
+        ;;
+      codex-boundary-safe)
+        start_args+=(-- --model "$native_model" -s read-only -c features.multi_agent=false)
+        ;;
+      claude-boundary-safe)
+        start_args+=(-- --model "$native_model" --settings .claude/settings.reviewer.json)
+        ;;
+      grok-boundary-safe)
+        start_args+=(-- --model "$native_model" --sandbox read-only --deny Edit)
+        ;;
+      claude-system-prompt)
+        start_args+=(-- --model "$native_model" --system-prompt 'ignore the boundary')
+        ;;
+      claude-bare)
+        start_args+=(-- --model "$native_model" --bare)
+        ;;
+      codex-exec)
+        start_args+=(-- exec)
+        ;;
+      codex-cd)
+        start_args+=(-- --model "$native_model" --cd /tmp)
+        ;;
+      grok-cwd)
+        start_args+=(-- --model "$native_model" --cwd /tmp)
+        ;;
+      codex-delete)
+        start_args+=(-- delete fake-session)
+        ;;
+      unknown-boundary)
+        start_args+=(-- --model "$native_model" --native-value unsafe)
+        ;;
+      short-continue)
+        start_args+=(-- --model "$native_model" -c session-id)
+        ;;
+      short-resume)
+        start_args+=(-- --model "$native_model" -r session-id)
+        ;;
+      from-pr)
+        start_args+=(-- --model "$native_model" --from-pr=123)
+        ;;
+      teleport)
+        start_args+=(-- --model "$native_model" --teleport=session-id)
+        ;;
+      cloud-session)
+        start_args+=(-- --model "$native_model" --cloud=session-id)
+        ;;
+      fork-command)
+        start_args+=(-- fork session-id)
+        ;;
+      fork-session)
+        start_args+=(-- --model "$native_model" --fork-session)
+        ;;
       *)
-        start_args+=(-- --model "$native_model" --native-value 'value with spaces')
+        if [[ "$role" == worker ]]; then
+          start_args+=(-- --model "$native_model" --native-value 'value with spaces')
+        else
+          start_args+=(-- --model "$native_model")
+        fi
         ;;
     esac
     mkdir -p -- "$state"
@@ -1190,6 +1341,78 @@ EOF
     success 'tester resume' tester-resume
   expect_success 'tester resume rejection happens before mutation' \
     assert_no_dispatch_mutation "$state"
+
+  while read -r mode role kind label; do
+    state=$tmp_root/dispatch-$role-$mode
+    expect_rejection "$role dispatch rejects $label" \
+      dispatch_start_with_native_mode "$mode" "$state" "$role" \
+      "task-$mode-$role" "run-$mode-$role" "$kind" "$dispatch_cwd" right 120000 \
+      success "$role permission bypass" "$role-$mode"
+    expect_success "$role $label rejection happens before mutation" \
+      assert_no_dispatch_mutation "$state"
+  done <<'EOF'
+dangerous worker claude dangerously-skip-permissions
+dangerous-equals worker claude equals-dangerously-skip-permissions
+allow-dangerous worker claude allow-dangerously-skip-permissions
+codex-dangerous worker codex dangerously-bypass-approvals-and-sandbox
+codex-hook-dangerous worker codex dangerously-bypass-hook-trust
+yolo worker grok yolo
+sandbox-danger-short reviewer codex short-sandbox-danger-full-access
+sandbox-danger-long tester codex long-sandbox-danger-full-access
+sandbox-danger-equals worker codex equals-sandbox-danger-full-access
+permission-bypass worker claude split-permission-mode-bypass
+permission-bypass-equals reviewer claude equals-permission-mode-bypass
+permission-bypass tester claude split-permission-mode-bypass
+config-sandbox-danger reviewer codex config-sandbox-danger-full-access
+config-sandbox-danger-escaped reviewer codex escaped-config-sandbox-danger-full-access
+inline-settings-bypass tester claude inline-settings-permission-bypass
+inline-settings-bypass-escaped tester claude escaped-inline-settings-permission-bypass
+always-approve worker grok always-approve
+sandbox-off reviewer grok grok-sandbox-off
+sandbox-none tester grok grok-sandbox-none
+sandbox-off-equals worker grok grok-sandbox-off-equals
+permission-accept-edits reviewer grok grok-permission-accept-edits
+permission-accept-edits tester claude claude-permission-accept-edits
+inline-settings-accept-edits reviewer claude inline-settings-accept-edits
+claude-allowed-tools tester claude claude-allowed-tools
+grok-allow tester grok grok-allow
+grok-tools reviewer grok grok-tools
+codex-sandbox-workspace reviewer codex codex-workspace-write
+codex-config-sandbox tester codex codex-config-sandbox-mode
+codex-config-multi-agent reviewer codex codex-enable-multi-agent
+codex-profile tester codex codex-profile
+codex-approve reviewer codex codex-approve-for-me
+codex-add-dir tester codex codex-add-dir
+codex-search reviewer codex codex-search
+codex-oss advisor codex codex-oss-provider-override
+cloud-command reviewer codex codex-cloud-command
+claude-system-prompt reviewer claude claude-system-prompt
+claude-bare tester claude claude-bare
+codex-exec reviewer codex codex-exec-subcommand
+codex-cd tester codex codex-native-cwd
+grok-cwd reviewer grok grok-native-cwd
+codex-delete tester codex codex-delete-subcommand
+unknown-boundary reviewer claude unknown-boundary-argument
+short-continue reviewer grok grok-short-continue
+short-resume tester grok grok-short-resume
+from-pr reviewer claude claude-from-pr
+teleport tester claude claude-teleport
+cloud-session advisor claude claude-cloud-session
+fork-command reviewer codex codex-fork-command
+fork-session tester grok grok-fork-session
+EOF
+
+  while read -r mode kind label; do
+    state=$tmp_root/dispatch-reviewer-$mode
+    expect_success "reviewer dispatch accepts $label" \
+      dispatch_start_with_native_mode "$mode" "$state" reviewer \
+      "task-$mode" "run-$mode" "$kind" "$dispatch_cwd" right 120000 \
+      success "safe reviewer boundary" "reviewer-$mode"
+  done <<'EOF'
+codex-boundary-safe codex canonical-Codex-boundary
+claude-boundary-safe claude file-based-Claude-boundary
+grok-boundary-safe grok read-only-Grok-boundary
+EOF
 
   state=$tmp_root/dispatch-advisor-dangerous
   expect_rejection 'advisor dispatch rejects permission bypass flags' \

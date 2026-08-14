@@ -211,10 +211,12 @@ fails before split. After updating HOD, restart or reload long-lived controller
 sessions so they load the new instructions; HOD cannot retrofit a running
 session's loaded instructions. On a verified failure before any agent-start
 attempt, HOD closes only the freshly split child after exact cleanup readback.
-If another actor claimed or changed it, HOD leaves it open and fails closed.
-Pre-delivery failures restore staged metadata when possible; ambiguous
-lifecycle attempts are never auto-retried. HOD never closes an unproven or
-already-started pane.
+A change visible at that read makes HOD leave it open and fail closed. Herdr
+0.8 has no owner-CAS for the following close or metadata write, so an outside
+mutation in that final interval remains a race; never mix raw lifecycle
+operations with an active HOD dispatch. Pre-delivery failures restore staged
+metadata when possible; ambiguous lifecycle attempts are never auto-retried.
+HOD never intentionally closes an unproven or already-started pane.
 
 ## Optional: local HOD UI console
 
@@ -278,9 +280,16 @@ Detach any time with `ctrl+b` then `q`; everything keeps running. Reattach with
 
 1. Answer blocked workers **through the controller**, never by typing into the
    worker's pane — one chain of command.
-2. Never combine `--dangerously-skip-permissions` with a `--settings` role
-   profile: that flag disables every deny rule and the profile stops enforcing
-   anything.
+2. Never combine a native permission bypass flag or mode with a `--settings`
+   role profile. Forms such as `--dangerously-skip-permissions` and
+   `--permission-mode bypassPermissions` disable deny rules; `hod dispatch
+   start` rejects direct forms and values in native argv before mutation. It
+   does not inspect referenced settings, profile, or config files, custom
+   sandbox profiles, or ambient CLI configuration; pass only inputs you trust.
+   Advisor, reviewer, and tester starts additionally use a positive native-arg
+   allowlist: no root subcommands or native cwd/system-prompt changes. Use
+   file-based Claude settings, Codex `-s read-only -c
+   features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules.
 3. When something breaks, run `hod doctor` first and read
    [Troubleshooting](troubleshooting.md) — do not restart the Herdr server.
 
