@@ -13,6 +13,13 @@ tmp_root=$(mktemp -d "${TMPDIR:-/tmp}/hod-test.XXXXXX")
 tmp_root=$(cd -- "$tmp_root" && pwd -P)
 trap 'rm -rf -- "$tmp_root"' EXIT
 
+configure_test_repo_identity() {
+  local repo=$1
+  git -C "$repo" config user.email "hod-test@example.com"
+  git -C "$repo" config user.name "hod-test"
+  git -C "$repo" config commit.gpgSign false
+}
+
 # Local source repository so install never hits the network.
 src_repo=$tmp_root/src-repo
 mkdir -p -- "$src_repo"
@@ -22,8 +29,7 @@ tar -C "$repo_dir" \
   --exclude .venv \
   -cf - . | tar -C "$src_repo" -xf -
 git -C "$src_repo" init -q
-git -C "$src_repo" config user.email "hod-test@example.com"
-git -C "$src_repo" config user.name "hod-test"
+configure_test_repo_identity "$src_repo"
 git -C "$src_repo" add -A
 git -C "$src_repo" commit -q -m "test fixture"
 
@@ -2220,6 +2226,7 @@ expect_success 'install fixture for branch without upstream' \
   "${no_upstream_env[@]}" "$hod" install
 
 no_upstream_skill=$no_upstream_home/skill
+configure_test_repo_identity "$no_upstream_skill"
 no_upstream_branch=$(git -C "$no_upstream_skill" symbolic-ref --short HEAD)
 expect_success 'fixture branch starts with configured upstream' \
   git -C "$no_upstream_skill" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'
@@ -2285,6 +2292,7 @@ mkdir -p -- "$ambiguous_home" "$tmp_root/ambiguous-bin" \
 expect_success 'install fixture for ambiguous remote branches' \
   "${ambiguous_env[@]}" "$hod" install
 ambiguous_skill=$ambiguous_home/skill
+configure_test_repo_identity "$ambiguous_skill"
 ambiguous_branch=$(git -C "$ambiguous_skill" symbolic-ref --short HEAD)
 git -C "$ambiguous_skill" remote add backup "$src_repo"
 git -C "$ambiguous_skill" fetch --quiet backup
@@ -2318,6 +2326,7 @@ mkdir -p -- "$deleted_home" "$tmp_root/deleted-bin" \
 expect_success 'install fixture for deleted remote branch' \
   "${deleted_env[@]}" "$hod" install
 deleted_skill=$deleted_home/skill
+configure_test_repo_identity "$deleted_skill"
 git -C "$deleted_skill" checkout --quiet --no-track -b "$deleted_branch" \
   "origin/$deleted_branch"
 git -C "$src_repo" branch -D "$deleted_branch" >/dev/null
