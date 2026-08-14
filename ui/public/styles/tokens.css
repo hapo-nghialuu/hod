@@ -1,0 +1,88 @@
+/* tokens.css — semantic design tokens, single source of truth */
+:root {
+  /* Surfaces and text */
+  --color-background: #141413;
+  --color-surface: #1b1a19;
+  --color-surface-raised: #242321;
+  --color-surface-sunken: #0e0e0d;
+  --color-terminal-background: #00343d;
+  --color-foreground: #FAF9F5;
+  --color-foreground-muted: #b7b3a9;
+  --color-foreground-faint: #7d7a71;
+
+  /* Brand and state semantics */
+  --color-primary: #D97757;
+  --color-primary-foreground: #141413;
+  --color-primary-soft: #f6d6c9;
+  --color-primary-dim: #b55f44;
+  --color-ok: #4c9a5b;
+  --color-ok-foreground: #b8e6c0;
+  --color-warn: #d9a13b;
+  --color-warn-foreground: #f3d9a0;
+  --color-error: #c9544b;
+  --color-error-foreground: #f2b8b2;
+  --color-role-coordinator: #D97757;
+  --color-role-worker: #65B8A6;
+  --color-role-advisor: #E0AD5B;
+  --color-role-review: #B2A4E0;
+  --color-role-unmapped: #8a877f;
+
+  /* Compatibility aliases used by view modules */
+  --bg: var(--color-background);
+  --bg-raised: var(--color-surface);
+  --bg-sunken: var(--color-surface-sunken);
+  --terminal-bg: var(--color-terminal-background);
+  --fg: var(--color-foreground);
+  --fg-muted: var(--color-foreground-muted);
+  --fg-faint: var(--color-foreground-faint);
+  --accent: var(--color-primary);
+  --accent-fg: var(--color-primary-soft);
+  --accent-dim: var(--color-primary-dim);
+  --ok: var(--color-ok);
+  --ok-fg: var(--color-ok-foreground);
+  --warn: var(--color-warn);
+  --warn-fg: var(--color-warn-foreground);
+  --err: var(--color-error);
+  --err-fg: var(--color-error-foreground);
+  --role-coordinator: var(--color-role-coordinator);
+  --role-worker: var(--color-role-worker);
+  --role-advisor: var(--color-role-advisor);
+  --role-review: var(--color-role-review);
+  --role-unmapped: var(--color-role-unmapped);
+
+  /* Lines and geometry */
+  --line: #3a3833;
+  --line-strong: #55524b;
+  --line-faint: #262522;
+  --border-width: 1px;
+  --border-w: var(--border-width);
+  --radius: 0;
+
+  /* Space — 4px base with 8px rhythm */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Type and interaction targets */
+  --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-xxs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 18px;
+  --fs-xl: 24px;
+  --target: 44px;
+
+  /* Stacking and motion */
+  --z-scanline: 5;
+  --z-topbar: 20;
+  --z-statusbar: 20;
+  --z-dialog: 60;
+  --dur-fast: 90ms;
+  --dur-base: 160ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}

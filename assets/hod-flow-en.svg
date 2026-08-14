@@ -9,6 +9,9 @@
     <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#9aa7c7"/>
     </marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b48cff"/>
+    </marker>
   </defs>
 
   <rect width="1440" height="640" fill="#0d1220"/>
@@ -20,7 +23,16 @@
   <!-- Controller -->
   <rect x="520" y="248" width="300" height="128" rx="16" fill="#131c31" stroke="#f0b429" stroke-width="2.5"/>
   <text x="670" y="300" text-anchor="middle" fill="#f0b429" font-size="24" font-weight="bold">Controller</text>
-  <text x="670" y="334" text-anchor="middle" fill="#9aa7c7" font-size="15">plans &amp; delegates only</text>
+  <text x="670" y="332" text-anchor="middle" fill="#9aa7c7" font-size="15">routes · delegates · verifies</text>
+  <text x="670" y="358" text-anchor="middle" fill="#8fbfff" font-size="12">DIRECT · SINGLE · ORCHESTRATE</text>
+
+  <!-- Optional advisor overlay -->
+  <rect x="535" y="70" width="270" height="90" rx="14" fill="#131c31" stroke="#b48cff" stroke-width="1.8" stroke-dasharray="7 5"/>
+  <circle cx="563" cy="108" r="6" fill="#b48cff"/>
+  <text x="678" y="112" text-anchor="middle" fill="#e6edf3" font-size="19">Advisor · optional</text>
+  <text x="670" y="138" text-anchor="middle" fill="#9aa7c7" font-size="13">fresh · read-only · assessment</text>
+  <line x1="670" y1="244" x2="670" y2="164" stroke="#b48cff" stroke-width="1.8" stroke-dasharray="6 6" marker-end="url(#ap)"/>
+  <text paint-order="stroke" stroke="#0d1220" stroke-width="10" x="748" y="210" text-anchor="middle" fill="#b48cff" font-size="13">opt-in consult</text>
 
   <!-- Worker impl -->
   <rect x="1150" y="84" width="240" height="76" rx="12" fill="#131c31" stroke="#8b98b8" stroke-width="1.8"/>

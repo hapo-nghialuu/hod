@@ -1,5 +1,7 @@
 ## Herdr orchestration — Herdr-first project
 
+Inside Herdr, use `hod dispatch start` and `hod dispatch prompt` for children that must appear in HOD topology. Raw operations remain valid for deliberately untracked panes; never mix them with an active HOD dispatch on the same pane.
+
 Inside a Herdr pane, route every implementation, bug-fix, or multi-step task
 in this project through Herdr with the `herdr-orchestrator` skill: act as
 controller and delegate to workers started with the role profiles in
