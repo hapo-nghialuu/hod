@@ -412,8 +412,9 @@ adaptive_raw = open(adaptive_path, encoding="utf-8").read()
 
 
 def flattened(text):
-    # Markdown source hard-wraps prose, so a literal space in a pattern must
-    # not be defeated by a line break that only exists for line length.
+    # Markdown source is one physical line per prose paragraph, but normalize
+    # whitespace anyway so a literal space in a pattern is never defeated by
+    # an incidental line break (headings, list items, wrapped code spans).
     return re.sub(r"\s+", " ", text.replace("`", "")).strip()
 
 
