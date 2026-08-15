@@ -1,9 +1,6 @@
 # Policy: <project-slug>
 
-<!-- Copy this file to ~/.herdr-orc/projects/<project-slug>/policy.md and
-     edit it yourself. A policy file is a user-authored authority grant:
-     agents must never create, edit, or reinterpret one. An unedited
-     template grants nothing beyond what you deliberately keep in it. -->
+<!-- Copy this file to ~/.herdr-orc/projects/<project-slug>/policy.md and edit it yourself. A policy file is a user-authored authority grant: agents must never create, edit, or reinterpret one. An unedited template grants nothing beyond what you deliberately keep in it. -->
 
 Scope: <absolute project path>
 
