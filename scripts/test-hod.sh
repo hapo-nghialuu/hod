@@ -2922,6 +2922,55 @@ expect_success 'memo preserves file mode' \
   python3 -c 'import os,stat,sys; sys.exit(0 if stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o644 else 1)' \
     "$mproj/CLAUDE.md"
 
+# replace_preserving_mode's stat fallback only runs when `chmod --reference`
+# fails (always true on BSD; rare but possible on GNU too, e.g. a mktemp
+# sibling on a different filesystem). Force that fallback under a GNU-capable
+# stat (one that answers --version) to prove the flavor probe picks the `-c`
+# arm and never the BSD `-f` arm, which GNU misparses into a bogus file
+# operand. The fake -f arm below deliberately returns a wrong value so this
+# test would fail if the fix ever regressed to trying it under a GNU stat.
+mode_shim_dir=$tmp_root/mode-shim/bin
+mkdir -p -- "$mode_shim_dir"
+cat >"$mode_shim_dir/chmod" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  --reference=*) exit 1 ;;
+esac
+exec /bin/chmod "$@"
+SH
+chmod +x "$mode_shim_dir/chmod"
+cat >"$mode_shim_dir/stat" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  --version)
+    printf 'fake-stat (GNUlike) 1.0\n'
+    exit 0
+    ;;
+  -c)
+    exec python3 -c \
+      'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' \
+      "$3"
+    ;;
+  -f)
+    printf 'wrong-arm-should-never-run\n'
+    exit 1
+    ;;
+esac
+exit 1
+SH
+chmod +x "$mode_shim_dir/stat"
+
+mode_shim_proj=$tmp_root/projects/memo-mode-shim
+new_memo_project "$mode_shim_proj"
+printf '# CLAUDE.md\n\nuser prose above\n' >"$mode_shim_proj/CLAUDE.md"
+chmod 644 "$mode_shim_proj/CLAUDE.md"
+
+expect_success 'project install succeeds when chmod --reference fails under a GNU-capable stat' \
+  env PATH="$mode_shim_dir:$PATH" "$hod" install --project "$mode_shim_proj"
+expect_success 'mode fallback resolves via the GNU stat arm, not the BSD misparse arm' \
+  python3 -c 'import os,stat,sys; sys.exit(0 if stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o644 else 1)' \
+    "$mode_shim_proj/CLAUDE.md"
+
 # Content the user adds after the block must survive a re-install.
 printf '\n## added later\n\nkeep me\n' >>"$mproj/CLAUDE.md"
 cp -- "$mproj/CLAUDE.md" "$tmp_root/memo-snapshot.md"
@@ -3904,7 +3953,16 @@ expect_success 'start writes a pid file' \
 read -r bg_pid _ <"$bg_pid_file"
 expect_success 'start --background pid is a real live process' \
   kill -0 "$bg_pid"
-run_dir_mode=$(stat -f '%Lp' "$hod_home/run" 2>/dev/null || stat -c '%a' "$hod_home/run" 2>/dev/null)
+# GNU stat's -f is a boolean filesystem-status flag, not "use this format" —
+# trying it the same way as BSD's -f misparses the format string as a file
+# operand, and the failed attempt's stray stdout can leak into $run_dir_mode
+# before the fallback runs. Detect the flavor with --version first so only
+# the matching invocation ever executes.
+if stat --version >/dev/null 2>&1; then
+  run_dir_mode=$(stat -c '%a' "$hod_home/run" 2>/dev/null || true)
+else
+  run_dir_mode=$(stat -f '%Lp' "$hod_home/run" 2>/dev/null || true)
+fi
 expect_success 'start creates run/ with mode 700' \
   test "$run_dir_mode" = 700
 expect_success 'start log never contains the raw one-time token' \

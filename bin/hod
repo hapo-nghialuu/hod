@@ -384,14 +384,23 @@ install_project_adapters_absolute() {
 # Replace a file through a temporary sibling, keeping the original mode. mktemp
 # creates 0600, which would silently tighten a repository file's permissions.
 # GNU chmod has --reference; BSD does not, and its stat spells the mode
-# differently, so validate whatever the fallback produces before trusting it.
-# BSD chmod also rejects `--`, so no end-of-options marker here.
+# differently. GNU stat's -f is a boolean filesystem-status flag, not "use
+# this format" — trying it the same way as BSD's -f misparses the format
+# string as a file operand, and a failed attempt's stray stdout can still
+# leak into $mode before the fallback runs. Detect the flavor with --version
+# first so only the matching invocation ever executes, then validate whatever
+# it produces before trusting it. BSD chmod also rejects `--`, so no
+# end-of-options marker here.
 replace_preserving_mode() {
   local tmp=$1 file=$2
   local mode
 
   if [[ -f "$file" ]] && ! chmod "--reference=$file" "$tmp" 2>/dev/null; then
-    mode=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null || true)
+    if stat --version >/dev/null 2>&1; then
+      mode=$(stat -c '%a' "$file" 2>/dev/null || true)
+    else
+      mode=$(stat -f '%Lp' "$file" 2>/dev/null || true)
+    fi
     if [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then
       chmod "$mode" "$tmp"
     fi
