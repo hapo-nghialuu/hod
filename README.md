@@ -174,14 +174,12 @@ See the [adaptive coordinator reference](references/coordinator-advisor.md) for 
 | `hod update` | Fast-forward the skill; a pinned checkout moves to the newest tag. Refuses a dirty tree |
 | `hod settings list` | Show Claude role profiles and equivalent Codex flags; Grok uses its native flags — no templates printed |
 | `hod settings install [--role <r>] [--force]` | Write role profiles into a project's `.claude/` |
-| `hod prompt-safe <target> <text> [--force] [--timeout <ms>]` | Resolve a live agent and send a duplicate-guarded prompt |
-| `hod harvest <target> [--lines N]` | Save recent output from a live agent |
 | `hod dispatch start --name <unique> --role <r> --task <slug> --run <id> --kind <kind> --cwd <absolute> --direction <right\|down> --timeout <ms> -- ...` | Start one guarded child from a direct-user prompt on stdin; emit a JSON receipt |
 | `hod dispatch prompt --pane <id> --kind <kind> --task <slug> --run <id> --timeout <ms>` | Refresh and validate a child before redirecting a direct-user prompt from stdin |
 | `hod ui [--project <path>] [--port <0-65535>] [--no-open]` | Launch the local HOD web console (Node.js 20+) |
 | `hod uninstall [--purge]` | Remove only adapters that resolve into `~/.hod/skill`, and strip the reminder block; never touches foreign files |
 
-The diagnostic checks against Herdr remain **read-only** (`herdr status`, `herdr integration status`). `hod prompt-safe` sends a guarded prompt to a resolved live agent; `hod harvest` saves bounded recent output. `hod dispatch` is the supported HOD workflow for starting and prompting children; it owns only deterministic topology guards. Planning, routing, and authority stay with the controller and you. `hod` never installs integrations. The local UI can change only the documented settings after your explicit confirmation — session authority stays with you and the controller.
+The diagnostic checks against Herdr remain **read-only** (`herdr status`, `herdr integration status`). `hod dispatch` is the supported HOD workflow for starting and prompting children; it owns only deterministic topology guards. Planning, routing, and authority stay with the controller and you. `hod` never installs integrations. The local UI can change only the documented settings after your explicit confirmation — session authority stays with you and the controller.
 
 ## Guarded topology dispatch
 
@@ -230,15 +228,12 @@ hod ui [--project <path>] [--port <0-65535>] [--no-open]
 For the directory-independent, runtime-only observer, use:
 
 ```bash
-hod start [--port <0-65535>] [--no-open] [--background]
-hod stop [--force] [--timeout <ms>]
+hod start [--port <0-65535>] [--no-open]
 ```
 
 `hod start --project <path>` is rejected; the observer ignores the current directory. Its Settings view selects a live Herdr project/space by opaque workspace ID; the server resolves the current authoritative checkout and never exposes project paths to the browser. `hod ui` and `hod ui --project` keep their existing project-scoped behavior unchanged.
 
-`hod start` always detaches the runtime-only observer instead of blocking the terminal: it forks, writes a PID file and a redacted log under `$HOD_HOME/run/`, and returns immediately — no system tray or menu-bar icon is created. `--background` remains an accepted compatibility flag. A second `hod start` while one is already running is a no-op that reports the existing PID. `hod stop` sends `SIGTERM`, waits up to `--timeout` (default 10000ms), and only escalates to `SIGKILL` with `--force`; it is idempotent when nothing is running and never guesses at a stale or foreign PID file. The log filters the one-time `#token` fragment and other credential-shaped values before they touch disk, so `$HOD_HOME/run/start.log` never holds the live secret.
-
-It supports macOS and Linux and requires Node.js 20 or newer. `hod ui` keeps default port `0` (OS-selected), while `hod start` uses fixed port `4317` unless `--port` overrides it. The default browser opener is `open` on macOS or `xdg-open` on Linux. `--no-open`, or a failed opener, prints a recovery URL. Treat its one-time `#token` fragment as sensitive: never share or log it; the browser exchanges it for a local `HttpOnly; SameSite=Strict` cookie and clears the fragment.
+It supports macOS and Linux and requires Node.js 20 or newer. The default port is `0` (an OS-selected free port), and the default browser opener is `open` on macOS or `xdg-open` on Linux. `--no-open`, or a failed opener, prints a recovery URL. Treat its one-time `#token` fragment as sensitive: never share or log it; the browser exchanges it for a local `HttpOnly; SameSite=Strict` cookie and clears the fragment.
 
 The console is local-only (`127.0.0.1` with strict `Host`/`Origin` checks and no remote/LAN mode). Its Runtime view tracks multiple Herdr workspaces/spaces and agents using bounded polling, not event-driven Herdr subscriptions; Herdr outages are nonfatal and reconnect clears stale state. The dashboard reports all-space totals for spaces, agents, working, blocked, idle, and done, regardless of the selected space. Transcript output is only the selected pane's RAM-only, capped 16 MiB UTF-8 tail, read-only and not persistent, byte-exact, append-only, or an audit log. In `hod start`, Settings can install the documented three HOD role profiles for the selected live project and update exactly ten typed, allowlisted global Herdr keys after confirmation. Missing or ambiguous project roots fail closed; unknown and secret keys stay hidden. Runtime-only mode still exposes no agent-control actions.
 
@@ -413,8 +408,6 @@ hod update                         # pull the newest skill (or newest tag if pin
 hod install --project <path>       # attach one project (+ reminder block)
 hod install --project <path> --no-memo   # attach without touching CLAUDE.md
 hod settings install               # write role profiles into a project
-hod start                          # start the detached runtime observer
-hod stop                           # stop the detached runtime observer
 hod uninstall [--purge]            # remove hod-managed links only
 ```
 

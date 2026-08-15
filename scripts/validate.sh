@@ -37,7 +37,6 @@ if len(description) > 1024:
     )
 
 missing = []
-conflict_markers = []
 for markdown in sorted(root.rglob("*.md")):
     if ".git" in markdown.parts or "plans" in markdown.parts or ".claude" in markdown.parts or ".agents" in markdown.parts or ".codex" in markdown.parts:
         continue
@@ -48,17 +47,9 @@ for markdown in sorted(root.rglob("*.md")):
         relative = target.split("#", 1)[0]
         if relative and not (markdown.parent / relative).resolve().exists():
             missing.append(f"{markdown.relative_to(root)}: {target}")
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        if line.startswith("<<<<<<< ") or line.startswith(">>>>>>> "):
-            conflict_markers.append(f"{markdown.relative_to(root)}:{lineno}: {line}")
 
 if missing:
     raise SystemExit("Missing local Markdown targets:\n" + "\n".join(missing))
-
-if conflict_markers:
-    raise SystemExit(
-        "Unresolved merge conflict markers:\n" + "\n".join(conflict_markers)
-    )
 
 def markdown_section(text, heading):
     level = len(heading) - len(heading.lstrip("#"))

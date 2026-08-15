@@ -226,15 +226,12 @@ hod ui [--project <path>] [--port <0-65535>] [--no-open]
 Muốn xem observer runtime-only, không phụ thuộc thư mục hiện tại, dùng:
 
 ```bash
-hod start [--port <0-65535>] [--no-open] [--background]
-hod stop [--force] [--timeout <ms>]
+hod start [--port <0-65535>] [--no-open]
 ```
 
 `hod start --project <path>` bị từ chối; observer bỏ qua thư mục hiện tại. Settings chọn project/space Herdr đang chạy bằng workspace ID bất định danh; server tự resolve checkout hiện tại theo nguồn authoritative và không bao giờ đưa đường dẫn project ra browser. `hod ui` và `hod ui --project` vẫn giữ nguyên hành vi project-scoped hiện có.
 
-`hod start` luôn chạy nền cùng observer runtime-only thay vì chiếm terminal: fork tiến trình, ghi PID file và log đã redact dưới `$HOD_HOME/run/`, rồi trả lại terminal ngay — không tạo icon system tray hay menu-bar. `--background` vẫn được chấp nhận để tương thích script cũ. Gọi `hod start` lần hai khi đang chạy chỉ báo lại PID hiện có, không tạo tiến trình mới. `hod stop` gửi `SIGTERM`, đợi tối đa `--timeout` (mặc định 10000ms), chỉ dùng `SIGKILL` khi có `--force`; lệnh này idempotent khi không có gì đang chạy và không bao giờ đoán với một PID file cũ hoặc lạ. Log đã lọc bỏ fragment `#token` dùng một lần và các giá trị dạng credential khác trước khi ghi ra đĩa, nên `$HOD_HOME/run/start.log` không bao giờ chứa secret thật.
-
-UI hỗ trợ macOS và Linux, cần Node.js 20 trở lên. `hod ui` giữ port mặc định `0` để hệ điều hành tự chọn port trống; `hod start` dùng cố định port `4317`, trừ khi có `--port`. macOS dùng `open`, Linux dùng `xdg-open`. Với `--no-open`, hoặc khi lệnh mở trình duyệt thất bại, HOD in recovery URL. Fragment `#token` dùng một lần là dữ liệu nhạy cảm: không chia sẻ hay ghi log; browser đổi nó thành cookie cục bộ `HttpOnly; SameSite=Strict` rồi xóa fragment.
+UI hỗ trợ macOS và Linux, cần Node.js 20 trở lên. Port mặc định là `0` để hệ điều hành tự chọn port trống; macOS dùng `open`, Linux dùng `xdg-open`. Với `--no-open`, hoặc khi lệnh mở trình duyệt thất bại, `hod ui` in recovery URL. Fragment `#token` dùng một lần là dữ liệu nhạy cảm: không chia sẻ hay ghi log; browser đổi nó thành cookie cục bộ `HttpOnly; SameSite=Strict` rồi xóa fragment.
 
 Console chỉ local (`127.0.0.1`, kiểm tra chặt `Host`/`Origin`, không có remote/LAN). Runtime theo dõi nhiều workspace/space và agent bằng polling có giới hạn, không phải subscription Herdr event-driven; Herdr lỗi là nonfatal và reconnect xóa state stale. Dashboard tính tổng toàn bộ space cho spaces, agents, working, blocked, idle và done, không phụ thuộc space đang chọn. Transcript chỉ là tail 16 MiB UTF-8 trong RAM của pane đang chọn, chỉ đọc, không persistent, byte-exact, append-only hay audit log. Với `hod start`, Settings có thể cài ba profile role HOD đã công bố cho project live đang chọn và cập nhật đúng mười key Herdr global có kiểu sau khi xác nhận. Project root thiếu hoặc mơ hồ sẽ fail closed; key lạ/bí mật không lộ ra. Runtime-only vẫn không có hành động điều khiển agent.
 
