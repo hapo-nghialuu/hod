@@ -1392,6 +1392,12 @@ EOF
       fork-session)
         start_args+=(-- --model "$native_model" --fork-session)
         ;;
+      none)
+        # No `--` separator at all: DISPATCH_NATIVE_ARGS/native_args stay the
+        # empty array declared by cmd_dispatch_start. Regression coverage for
+        # the Bash 3.2 nounset trap on a bare "${arr[@]}" expansion of a
+        # zero-element array.
+        ;;
       *)
         if [[ "$role" == worker ]]; then
           start_args+=(-- --model "$native_model" --native-value 'value with spaces')
@@ -1899,6 +1905,25 @@ advisor consult fable fable
 reviewer verify
 tester verify
 EOF
+
+  # Regression for the Bash 3.2 nounset trap: no `--` at all means
+  # DISPATCH_NATIVE_ARGS/native_args stay the empty array cmd_dispatch_start
+  # declares them as, which stock macOS /bin/bash 3.2 aborts on if a bare
+  # "${arr[@]}" expansion is not guarded.
+  state=$tmp_root/dispatch-start-no-native-args
+  expect_success 'dispatch start succeeds for a worker with no trailing native args' \
+    dispatch_start_with_native_mode none "$state" worker \
+    task-no-native run-no-native claude "$dispatch_cwd" right 120000 \
+    success 'no native args prompt' worker-no-native
+  expect_success 'dispatch start with no native args forwards a bare trailing --' \
+    python3 - "$state/start.argv" <<'PY'
+import sys
+start = open(sys.argv[1], "rb").read().split(b"\0")[:-1]
+assert start == [
+    b"agent", b"start", b"worker-no-native", b"--kind", b"claude",
+    b"--pane", b"child-pane", b"--timeout", b"120000", b"--",
+], start
+PY
 
   state=$tmp_root/dispatch-start-busy
   expect_success 'dispatch retries only exact agent_pane_busy once' \
@@ -3203,7 +3228,7 @@ expect_success 'E0 snapshot becomes stale after a later content change' \
 # ---------------------------------------------------------------------------
 expect_success 'help exits 0' "$hod" help
 expect_success 'version exits 0' "$hod" version
-expect_output_contains 'version reports 0.1.17' 'hod 0.1.17' "$hod" version
+expect_output_contains 'version reports 0.1.18' 'hod 0.1.18' "$hod" version
 expect_success 'no-args prints usage' "$hod"
 
 # ---------------------------------------------------------------------------
@@ -3872,7 +3897,7 @@ log_lacks_token() {
 
 rm -rf -- "$hod_home/run"
 expect_success 'start returns without blocking (bounded 5s)' \
-  run_bounded 5 run_bg start --no-open
+  run_bounded 5 run_bg start
 expect_success 'start writes a pid file' \
   test -f "$bg_pid_file"
 
@@ -3889,7 +3914,7 @@ expect_success 'start log keeps a redacted marker in place of the fragment' \
 
 first_bg_pid=$bg_pid
 expect_output_contains 'a second start reports already running' \
-  'already running' run_bg start --background --no-open
+  'already running' run_bg start --background
 read -r bg_pid _ <"$bg_pid_file"
 expect_success 'a second start does not spawn a duplicate process' \
   test "$bg_pid" = "$first_bg_pid"

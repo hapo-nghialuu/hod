@@ -1,8 +1,8 @@
 # Adaptive Coordinator with Tripwire Escalation
 
-This is the normative reference for hod `0.1.17` adaptive mode. It is opt-in: activate it only when the user asks for an adaptive coordinator or for coordinator plus advisor behavior. Without that request, follow the existing `SKILL.md` workflow unchanged.
+This is the normative reference for hod `0.1.18` adaptive mode. It is opt-in: activate it only when the user asks for an adaptive coordinator or for coordinator plus advisor behavior. Without that request, follow the existing `SKILL.md` workflow unchanged.
 
-The protocol has three base modes — `DIRECT`, `SINGLE`, and `ORCHESTRATE` — with `CONSULT` and `ASK_USER` as overlays. It governs routing, evidence, tripwires, advisor review, handoff, and permission handling. It does not add a runtime service or a new CLI surface. This release does not add public ledger or evidence commands; those remain deferred beyond `0.1.17`.
+The protocol has three base modes — `DIRECT`, `SINGLE`, and `ORCHESTRATE` — with `CONSULT` and `ASK_USER` as overlays. It governs routing, evidence, tripwires, advisor review, handoff, and permission handling. It does not add a runtime service or a new CLI surface. This release does not add public ledger or evidence commands; those remain deferred beyond `0.1.18`.
 
 ## Invariants
 
@@ -199,7 +199,7 @@ E0 rules:
 8. A passing receipt proves bounded consistency after writers quiesce, not an atomic filesystem snapshot, resistance to adversarial ABA mutation, semantic correctness or user authority.
 9. When G2 runs, send only the post-check receipt. After the G2 verdict, repeat the stable double capture. Any mismatch in `HEAD_SHA`, the four change sets, their union, `DIFF_SHA256`, or dirty state invalidates both E0 and G2 and restarts checks, E0, and G2 on the new state.
 10. A revision or evidence change after the final E0 makes the receipt stale and requires a new receipt before acceptance or integration.
-11. `0.1.17` uses bounded Git, Herdr, and test commands; it adds no evidence validator command.
+11. `0.1.18` uses bounded Git, Herdr, and test commands; it adds no evidence validator command.
 
 ### Conditional advisor gates
 

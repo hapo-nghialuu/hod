@@ -68,7 +68,7 @@ Grok Build has no integration: it runs fine as a controller or worker, but its s
 curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | sh
 
 # Or pin a release — recommended for teams, reproducible:
-curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.17 sh
+curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh | HOD_REF=v0.1.18 sh
 ```
 
 This clones the skill into `~/.hod/skill/`, puts the `hod` executable on `~/.local/bin/`, and links global adapters so every agent CLI can find the skill. If the installer warns about `PATH`, add the exact line it prints to your shell profile and open a new terminal.
