@@ -12,44 +12,19 @@ A role is defined by the promise the controller may trust, not by the mechanism.
 
 ## Advisor mapping
 
-An adaptive advisor is a fresh reviewer session, not a fourth permission role.
-The user chooses one advisor model from `Fable`, `GPT-5.6 Sol`, or `Opus`; the
-model choice does not change the CLI boundary:
+An adaptive advisor is a fresh reviewer session, not a fourth permission role. The user chooses one advisor model from `Fable`, `GPT-5.6 Sol`, or `Opus`; the model choice does not change the CLI boundary:
 
 | Adaptive gate | Boundary | Claude | Codex |
 | --- | --- | --- | --- |
 | `G1 PLAN`, `G2 EVIDENCE`, `G3 BLOCKER`, `G4 RISK` | Fresh, read-only reviewer | `settings.reviewer.json` | `-s read-only -c features.multi_agent=false` |
 
-The advisor reads a self-contained packet and returns an assessment. It does
-not edit, dispatch, choose a replacement model, or grant authority. A G2
-advisor is independent of the writer and any G1 advisor; it may also serve as
-the final independent reviewer, so a second reviewer is not assumed. Do not
-create a new advisor settings template: reuse the existing reviewer profile or
-flags and retain the CLI-specific gaps below. R0 v2, its single read-only probe,
-dependency invalidation, and benchmark receipt do not widen any role: user
-authority and preference still outrank advisor judgment, and benchmark
-metadata grants no write, dispatch, integration, or publication permission.
+The advisor reads a self-contained packet and returns an assessment. It does not edit, dispatch, choose a replacement model, or grant authority. A G2 advisor is independent of the writer and any G1 advisor; it may also serve as the final independent reviewer, so a second reviewer is not assumed. Do not create a new advisor settings template: reuse the existing reviewer profile or flags and retain the CLI-specific gaps below. R0 v2, its single read-only probe, dependency invalidation, and benchmark receipt do not widen any role: user authority and preference still outrank advisor judgment, and benchmark metadata grants no write, dispatch, integration, or publication permission.
 
 ## Control-plane checkpoint exception
 
-When adaptive mode requires an external Markdown checkpoint, only the active
-coordinator may write that control-plane metadata. This is the sole sanctioned
-exception to the no-shell-bypass rule: a local shell may create or update only
-the one exact checkpoint path outside the checkout. It does not grant
-permission to edit task files, worker artifacts, repository content, or a
-substitute path. Workers and advisors never write the checkpoint.
+When adaptive mode requires an external Markdown checkpoint, only the active coordinator may write that control-plane metadata. This is the sole sanctioned exception to the no-shell-bypass rule: a local shell may create or update only the one exact checkpoint path outside the checkout. It does not grant permission to edit task files, worker artifacts, repository content, or a substitute path. Workers and advisors never write the checkpoint.
 
-The checkpoint lives in a unique temporary directory outside the checkout and
-contains bounded metadata, paths, hashes, and receipts. It is reconciled with
-Herdr state, Git state, actual artifacts, and fresh E0 evidence on resume; it
-is not canonical truth. The protocol makes no claim of locking, lease
-enforcement, atomicity, crash recovery, or durable cross-reboot storage.
-Existing controller profiles do not mechanically restrict an available shell
-to the checkpoint path, so the narrow path and no-task-write limits are
-wording-level plus evidence-checked; never report them as sandbox enforcement.
-If the active coordinator cannot write the safe external path, do not broaden
-a sandbox or use the checkout as a fallback: run an independent R0 and
-otherwise stop with `HOLD + ASK_USER`.
+The checkpoint lives in a unique temporary directory outside the checkout and contains bounded metadata, paths, hashes, and receipts. It is reconciled with Herdr state, Git state, actual artifacts, and fresh E0 evidence on resume; it is not canonical truth. The protocol makes no claim of locking, lease enforcement, atomicity, crash recovery, or durable cross-reboot storage. Existing controller profiles do not mechanically restrict an available shell to the checkpoint path, so the narrow path and no-task-write limits are wording-level plus evidence-checked; never report them as sandbox enforcement. If the active coordinator cannot write the safe external path, do not broaden a sandbox or use the checkout as a fallback: run an independent R0 and otherwise stop with `HOLD + ASK_USER`.
 
 Codex worker examples, passed after Herdr's `--` separator:
 
@@ -85,8 +60,7 @@ The `<abs-repo>` replacement matters because Codex protects `.git` by default in
 
 ## Verified Codex behavior
 
-Verified experimentally with codex-cli `0.145.0`–`0.147.0` on macOS. The
-interactive `spawn_agent` result differs between `0.146.1` and `0.147.0`:
+Verified experimentally with codex-cli `0.145.0`–`0.147.0` on macOS. The interactive `spawn_agent` result differs between `0.146.1` and `0.147.0`:
 
 - The `0.146.0` impl proof committed successfully: `ce220e4 proof`; `rev-list count = 2`.
 - `-s read-only` rejects writes at the OS layer: `patch rejected: writing is blocked by read-only sandbox`.

@@ -59,23 +59,11 @@ curl -fsSL https://raw.githubusercontent.com/hapo-nghialuu/hod/main/install.sh |
 
 </details>
 
-That is the whole setup: nothing to rearrange, no per-project ceremony. `hod`
-clones the skill into `~/.hod/skill/`, puts the `hod` executable on
-`~/.local/bin/`, and links global adapters so every agent CLI can find it.
-Attach a single project instead with `hod install --project /path/to/repo`.
+That is the whole setup: nothing to rearrange, no per-project ceremony. `hod` clones the skill into `~/.hod/skill/`, puts the `hod` executable on `~/.local/bin/`, and links global adapters so every agent CLI can find it. Attach a single project instead with `hod install --project /path/to/repo`.
 
-Recommended next: install the matching Herdr integration for each CLI you
-actually run — `herdr integration install claude`, `herdr integration install
-codex`, or `herdr integration install grok`. The right integration makes agent
-state and session identity authoritative in the sidebar rather than guessed;
-install one per CLI you use, and only for the ones you use.
+Recommended next: install the matching Herdr integration for each CLI you actually run — `herdr integration install claude`, `herdr integration install codex`, or `herdr integration install grok`. The right integration makes agent state and session identity authoritative in the sidebar rather than guessed; install one per CLI you use, and only for the ones you use.
 
-**Integrations vs plugins.** Herdr *integrations* are the connectors above —
-they give the sidebar authoritative per-CLI agent state and session identity.
-Herdr *plugins* are a separate, optional extension surface: third-party
-actions, event hooks, and plugin panes. hod never requires a plugin. See
-[Herdr integrations](https://herdr.dev/docs/integrations/) and
-[Herdr plugin APIs](https://herdr.dev/docs/socket-api/#plugin-apis).
+**Integrations vs plugins.** Herdr *integrations* are the connectors above — they give the sidebar authoritative per-CLI agent state and session identity. Herdr *plugins* are a separate, optional extension surface: third-party actions, event hooks, and plugin panes. hod never requires a plugin. See [Herdr integrations](https://herdr.dev/docs/integrations/) and [Herdr plugin APIs](https://herdr.dev/docs/socket-api/#plugin-apis).
 
 ### 3 · Run your first orchestrated task
 
@@ -85,8 +73,7 @@ herdr                 # Herdr opens
 claude                # inside the pane — this is your controller
 ```
 
-Paste this, naming **Herdr** and **herdr-orchestrator** — without both names
-the skill stays dormant:
+Paste this, naming **Herdr** and **herdr-orchestrator** — without both names the skill stays dormant:
 
 ```text
 Use Herdr and the herdr-orchestrator skill to <a small, verifiable task>.
@@ -104,45 +91,29 @@ Return changed files, real test results, and unresolved questions.
 | Grok Build | plain request | Ask explicitly to use the `herdr-orchestrator` skill |
 | Any | naming it in the request | The example above — works everywhere, no prefix needed |
 
-Loading the skill by command and describing the task in plain words reach the
-same place. The prefix forms save you from repeating the skill name; the plain
-request is one less thing to remember. Either way the task itself still needs
-the outcome, the roles, and what evidence you expect back.
+Loading the skill by command and describing the task in plain words reach the same place. The prefix forms save you from repeating the skill name; the plain request is one less thing to remember. Either way the task itself still needs the outcome, the roles, and what evidence you expect back.
 
 </details>
 
-> ✅ **It is working when new panes appear in the Herdr sidebar.**
-> Status dots: 🟡 working (leave it alone) · 🔴 blocked (it needs you — read
-> that pane, but answer in the controller's pane) · 🟢 idle.
-> Detach any time with `ctrl+b` then `q`; nothing dies.
+> ✅ **It is working when new panes appear in the Herdr sidebar.** Status dots: 🟡 working (leave it alone) · 🔴 blocked (it needs you — read that pane, but answer in the controller's pane) · 🟢 idle. Detach any time with `ctrl+b` then `q`; nothing dies.
 
-**Need more detail?** [Quickstart — five levels](docs/quickstart.md) ·
-[Getting started — six checked steps](docs/getting-started.md) ·
-[Troubleshooting](docs/troubleshooting.md)
+**Need more detail?** [Quickstart — five levels](docs/quickstart.md) · [Getting started — six checked steps](docs/getting-started.md) · [Troubleshooting](docs/troubleshooting.md)
 
 ---
 
 ## What is this?
 
-Running several AI coding agents at once is easy. Keeping track of them is
-not — you end up with a dozen terminal tabs, no idea which agent is waiting on
-you, and no way to tell whether "done" actually means the code works.
+Running several AI coding agents at once is easy. Keeping track of them is not — you end up with a dozen terminal tabs, no idea which agent is waiting on you, and no way to tell whether "done" actually means the code works.
 
-`hod` gives you **one agent to talk to**. You describe what you want; it plans
-the work, hands pieces to other agents in their own [Herdr](https://herdr.dev/)
-panes, checks their output against real diffs and real test runs, and comes
-back with one answer — plus a list of anything only you can decide.
+`hod` gives you **one agent to talk to**. You describe what you want; it plans the work, hands pieces to other agents in their own [Herdr](https://herdr.dev/) panes, checks their output against real diffs and real test runs, and comes back with one answer — plus a list of anything only you can decide.
 
 <p align="center">
   <img src="assets/hod-flow-en.svg" alt="You → adaptive controller → workers, reviewer, and optional advisor → verified evidence back" width="880">
 </p>
 
-You never manage the workers. You never chase a pane. You get evidence, not
-promises.
+You never manage the workers. You never chase a pane. You get evidence, not promises.
 
-**Good fit if you** run more than one coding agent, want a second pair of eyes
-on generated code, or need work split across projects without losing track of
-who changed what.
+**Good fit if you** run more than one coding agent, want a second pair of eyes on generated code, or need work split across projects without losing track of who changed what.
 
 > Independent community project. Not affiliated with Herdr, OpenAI, Anthropic, or xAI.
 
@@ -155,9 +126,7 @@ who changed what.
 | **The skill** | Markdown contract (`SKILL.md` + `references/`) | The brain: delegation rules, lifecycle discipline, verification, safety boundaries. Read by the LLM, enforced by its judgment |
 | **The `hod` CLI** | A single bash binary | The hands: installs the skill anywhere, diagnoses the setup, manages role permission profiles, and, for orchestration, applies only deterministic topology-dispatch guards. It never makes planning, routing, or authority decisions |
 
-This split is intentional: *the skill/controller makes planning, routing, and
-authority decisions; the CLI performs only deterministic dispatch mechanics* —
-and neither pretends to do the other's job.
+This split is intentional: *the skill/controller makes planning, routing, and authority decisions; the CLI performs only deterministic dispatch mechanics* — and neither pretends to do the other's job.
 
 ## How it works
 
@@ -169,37 +138,19 @@ and neither pretends to do the other's job.
    Return changed files, test results, and unresolved questions.
    ```
 
-2. **The controller runs a preflight** — refuses to act unless it is inside a
-   Herdr-managed pane (`HERDR_ENV=1`), the server is compatible, and the
-   installed command family matches `--help` exactly. For a child, guarded
-   `hod dispatch` binds and reads back the controller, splits, binds and reads
-   back the child, starts it, refreshes and reads it back, then submits the
-   direct-user prompt. Anything ambiguous fails closed.
+2. **The controller runs a preflight** — refuses to act unless it is inside a Herdr-managed pane (`HERDR_ENV=1`), the server is compatible, and the installed command family matches `--help` exactly. For a child, guarded `hod dispatch` binds and reads back the controller, splits, binds and reads back the child, starts it, refreshes and reads it back, then submits the direct-user prompt. Anything ambiguous fails closed.
 
-3. **Workers are addressed as if you wrote the prompt.** Herdr input carries
-   no sender field, so wording is the only thing that leaks routing — the
-   contract forbids "you are a sub-agent, report to the parent" framing
-   entirely.
+3. **Workers are addressed as if you wrote the prompt.** Herdr input carries no sender field, so wording is the only thing that leaks routing — the contract forbids "you are a sub-agent, report to the parent" framing entirely.
 
-4. **Nothing is believed, everything is verified.** An agent's `done` state
-   is a screen heuristic, not proof. The controller reads real diffs, runs
-   checks in panes with per-run sentinels (so stale `passed` text can never
-   be mistaken for fresh evidence), and sends material changes to an
-   independent reviewer in a fresh session.
+4. **Nothing is believed, everything is verified.** An agent's `done` state is a screen heuristic, not proof. The controller reads real diffs, runs checks in panes with per-run sentinels (so stale `passed` text can never be mistaken for fresh evidence), and sends material changes to an independent reviewer in a fresh session.
 
-5. **The report ends with what still needs you** — every worker's open
-   questions are harvested and attributed, never swallowed by the summary.
+5. **The report ends with what still needs you** — every worker's open questions are harvested and attributed, never swallowed by the summary.
 
-**You know it is working when new panes appear in the Herdr sidebar.** If you
-only see "background agents" messages and the sidebar stays still, the CLI is
-using its internal sub-agents, not Herdr orchestration — restate the request
-naming Herdr and the skill.
+**You know it is working when new panes appear in the Herdr sidebar.** If you only see "background agents" messages and the sidebar stays still, the CLI is using its internal sub-agents, not Herdr orchestration — restate the request naming Herdr and the skill.
 
 ## Adaptive coordinator (opt-in)
 
-The default workflow remains unchanged unless you explicitly ask for an
-adaptive coordinator or coordinator plus advisor. Adaptive mode chooses the
-smallest route that fits the request:
+The default workflow remains unchanged unless you explicitly ask for an adaptive coordinator or coordinator plus advisor. Adaptive mode chooses the smallest route that fits the request:
 
 | Base mode | Use it for | What happens |
 | --- | --- | --- |
@@ -207,18 +158,9 @@ smallest route that fits the request:
 | `SINGLE` | One reversible outcome with one narrow owner | One task packet and mechanical evidence for a repository change |
 | `ORCHESTRATE` | Multiple writers, dependencies, phases, repositories, or large blast radius | A working plan, explicit ownership, and ordered coordination |
 
-`CONSULT` and `ASK_USER` are overlays, not additional modes. Within adaptive
-mode, a consult opens a fresh independent advisor when you explicitly request
-one or a qualifying technical trigger fires; an authority, permission, cost,
-or external-action question pauses for you.
-Choose the advisor from `Fable`, `GPT-5.6 Sol`, or `Opus` explicitly before the
-dispatch — the advisor gives an assessment, never approval. If the selected
-advisor is unavailable, hold and ask; never default or substitute. Every
-repository change still gets a mechanical E0 evidence receipt before
-acceptance, and every tripwire holds before re-routing.
+`CONSULT` and `ASK_USER` are overlays, not additional modes. Within adaptive mode, a consult opens a fresh independent advisor when you explicitly request one or a qualifying technical trigger fires; an authority, permission, cost, or external-action question pauses for you. Choose the advisor from `Fable`, `GPT-5.6 Sol`, or `Opus` explicitly before the dispatch — the advisor gives an assessment, never approval. If the selected advisor is unavailable, hold and ask; never default or substitute. Every repository change still gets a mechanical E0 evidence receipt before acceptance, and every tripwire holds before re-routing.
 
-See the [adaptive coordinator reference](references/coordinator-advisor.md) for
-the complete protocol and [usage examples](docs/usage-guide.md).
+See the [adaptive coordinator reference](references/coordinator-advisor.md) for the complete protocol and [usage examples](docs/usage-guide.md).
 
 ## The `hod` command
 
@@ -237,18 +179,11 @@ the complete protocol and [usage examples](docs/usage-guide.md).
 | `hod ui [--project <path>] [--port <0-65535>] [--no-open]` | Launch the local HOD web console (Node.js 20+) |
 | `hod uninstall [--purge]` | Remove only adapters that resolve into `~/.hod/skill`, and strip the reminder block; never touches foreign files |
 
-The diagnostic checks against Herdr remain **read-only** (`herdr status`,
-`herdr integration status`). `hod dispatch` is the supported HOD workflow for
-starting and prompting children; it owns only deterministic topology guards.
-Planning, routing, and authority stay with the controller and you. `hod` never
-installs integrations. The local UI can change only the documented settings
-after your explicit confirmation — session authority stays with you and the
-controller.
+The diagnostic checks against Herdr remain **read-only** (`herdr status`, `herdr integration status`). `hod dispatch` is the supported HOD workflow for starting and prompting children; it owns only deterministic topology guards. Planning, routing, and authority stay with the controller and you. `hod` never installs integrations. The local UI can change only the documented settings after your explicit confirmation — session authority stays with you and the controller.
 
 ## Guarded topology dispatch
 
-For a child that must appear in the HOD topology, use `hod dispatch start` and
-send a non-empty direct-user prompt through stdin. The public shape is:
+For a child that must appear in the HOD topology, use `hod dispatch start` and send a non-empty direct-user prompt through stdin. The public shape is:
 
 ```text
 hod dispatch start --name <unique> --role worker|advisor|reviewer|tester \
@@ -268,32 +203,7 @@ printf '%s\n' 'Implement the health endpoint and return changed files and test r
     --settings .claude/settings.impl.json
 ```
 
-On success, stdout contains a JSON receipt with `pane_id`, `name`, `role`,
-`relation`, `task`, and `run`. The mechanical relation mapping is
-`worker=delegate`, `advisor=consult`, and `reviewer=tester=verify`.
-Advisor starts require an explicit canonical `--advisor-choice` and matching
-`--advisor-model`, plus exactly one matching native `-m` or `--model`; the
-receipt records the choice plus `requested_model` and explicitly marks the
-runtime model unverified. `fable`/`opus` require `--kind claude`; `gpt-5.6-sol`
-requires `--kind codex`. If the user has not chosen an advisor, `HOLD + ASK_USER`.
-Successful Herdr 0.8 start/get/prompt responses are checked for exact name,
-pane, kind, workspace, terminal identity, boolean readiness, allowed status,
-and `state_change_seq`; a NUL byte in stdin is rejected without truncation and
-prompts over 131072 bytes fail before mutation. `--timeout` is one wall-clock
-deadline through capability probes, locking, metadata, lifecycle calls, and
-delivery; failure cleanup has a separate hard three-second cap.
-Controller workspace, terminal, kind, and session must stay exact across the
-mutation; its pane revision may advance but cannot regress.
-Codex may expose its agent-session only after the first prompt: start therefore
-binds the unchanged launch terminal and sequence, waits for the real Codex UI
-prompt surface, and sends by unique agent name. A sessionless first receipt is
-accepted only in `working` or `blocked`. Every redirect requires a later
-authoritative read with a non-empty, unchanged session.
-Start first reads the controller pane: an untagged pane may bootstrap, an
-existing controller must have the requested `hod_run`, and child/partial/invalid
-HOD tokens fail before report, split, start, or prompt. Prompt rejects advisor,
-pane-working, authoritative-agent-working, or not-ready children before any
-metadata report.
+On success, stdout contains a JSON receipt with `pane_id`, `name`, `role`, `relation`, `task`, and `run`. The mechanical relation mapping is `worker=delegate`, `advisor=consult`, and `reviewer=tester=verify`. Advisor starts require an explicit canonical `--advisor-choice` and matching `--advisor-model`, plus exactly one matching native `-m` or `--model`; the receipt records the choice plus `requested_model` and explicitly marks the runtime model unverified. `fable`/`opus` require `--kind claude`; `gpt-5.6-sol` requires `--kind codex`. If the user has not chosen an advisor, `HOLD + ASK_USER`. Successful Herdr 0.8 start/get/prompt responses are checked for exact name, pane, kind, workspace, terminal identity, boolean readiness, allowed status, and `state_change_seq`; a NUL byte in stdin is rejected without truncation and prompts over 131072 bytes fail before mutation. `--timeout` is one wall-clock deadline through capability probes, locking, metadata, lifecycle calls, and delivery; failure cleanup has a separate hard three-second cap. Controller workspace, terminal, kind, and session must stay exact across the mutation; its pane revision may advance but cannot regress. Codex may expose its agent-session only after the first prompt: start therefore binds the unchanged launch terminal and sequence, waits for the real Codex UI prompt surface, and sends by unique agent name. A sessionless first receipt is accepted only in `working` or `blocked`. Every redirect requires a later authoritative read with a non-empty, unchanged session. Start first reads the controller pane: an untagged pane may bootstrap, an existing controller must have the requested `hod_run`, and child/partial/invalid HOD tokens fail before report, split, start, or prompt. Prompt rejects advisor, pane-working, authoritative-agent-working, or not-ready children before any metadata report.
 
 To redirect an existing child, send the new direct-user prompt through stdin:
 
@@ -303,32 +213,13 @@ printf '%s\n' 'Continue the task and report fresh verification.' |
     --kind claude --run run-demo-001 --timeout 120000
 ```
 
-`hod dispatch prompt` refreshes and validates the controller and child before
-redirecting, including an authoritative agent-get working-state check. Advisor
-redirect is rejected because every consult is a fresh start. Raw `herdr pane
-split`, `herdr agent start`, and `herdr agent prompt` remain valid for
-deliberately untracked work; those panes may appear `UNMAPPED` and are outside
-HOD lifecycle guarantees. Do not mix raw mutations with an active HOD dispatch
-for the same pane. An old Herdr that lacks the exact required capability fails
-before split; there is no fallback. After updating HOD, restart or reload
-long-lived controller sessions so they load the new instructions — HOD cannot
-retrofit instructions already loaded in a running session.
+`hod dispatch prompt` refreshes and validates the controller and child before redirecting, including an authoritative agent-get working-state check. Advisor redirect is rejected because every consult is a fresh start. Raw `herdr pane split`, `herdr agent start`, and `herdr agent prompt` remain valid for deliberately untracked work; those panes may appear `UNMAPPED` and are outside HOD lifecycle guarantees. Do not mix raw mutations with an active HOD dispatch for the same pane. An old Herdr that lacks the exact required capability fails before split; there is no fallback. After updating HOD, restart or reload long-lived controller sessions so they load the new instructions — HOD cannot retrofit instructions already loaded in a running session.
 
-Dispatches for one coordinator are serialized. Redirect binds the expected
-kind plus unchanged terminal and agent-session identities; verified pre-start
-bind failures close only the newly split pane after an exact cleanup readback.
-A change visible at that read makes HOD leave the pane open and fail closed.
-Herdr 0.8 has no owner-CAS for the following close or metadata write, so an
-outside mutation in that final interval remains a race; never mix raw lifecycle
-operations with an active HOD dispatch. Pre-delivery failures restore staged
-metadata when Herdr accepts the rollback; ambiguous lifecycle attempts are
-never auto-retried. HOD never intentionally closes an unproven or
-already-started pane.
+Dispatches for one coordinator are serialized. Redirect binds the expected kind plus unchanged terminal and agent-session identities; verified pre-start bind failures close only the newly split pane after an exact cleanup readback. A change visible at that read makes HOD leave the pane open and fail closed. Herdr 0.8 has no owner-CAS for the following close or metadata write, so an outside mutation in that final interval remains a race; never mix raw lifecycle operations with an active HOD dispatch. Pre-delivery failures restore staged metadata when Herdr accepts the rollback; ambiguous lifecycle attempts are never auto-retried. HOD never intentionally closes an unproven or already-started pane.
 
 ## The local HOD UI console
 
-The UI is an optional local web console for watching Herdr workspaces and
-agents without managing panes by hand:
+The UI is an optional local web console for watching Herdr workspaces and agents without managing panes by hand:
 
 ```bash
 hod ui [--project <path>] [--port <0-65535>] [--no-open]
@@ -340,41 +231,17 @@ For the directory-independent, runtime-only observer, use:
 hod start [--port <0-65535>] [--no-open]
 ```
 
-`hod start --project <path>` is rejected; the observer ignores the current
-directory. Its Settings view selects a live Herdr project/space by opaque
-workspace ID; the server resolves the current authoritative checkout and never
-exposes project paths to the browser. `hod ui` and `hod ui --project` keep their
-existing project-scoped behavior unchanged.
+`hod start --project <path>` is rejected; the observer ignores the current directory. Its Settings view selects a live Herdr project/space by opaque workspace ID; the server resolves the current authoritative checkout and never exposes project paths to the browser. `hod ui` and `hod ui --project` keep their existing project-scoped behavior unchanged.
 
-It supports macOS and Linux and requires Node.js 20 or newer. The default port
-is `0` (an OS-selected free port), and the default browser opener is `open` on
-macOS or `xdg-open` on Linux. `--no-open`, or a failed opener, prints a recovery
-URL. Treat its one-time `#token` fragment as sensitive: never share or log it;
-the browser exchanges it for a local `HttpOnly; SameSite=Strict` cookie and
-clears the fragment.
+It supports macOS and Linux and requires Node.js 20 or newer. The default port is `0` (an OS-selected free port), and the default browser opener is `open` on macOS or `xdg-open` on Linux. `--no-open`, or a failed opener, prints a recovery URL. Treat its one-time `#token` fragment as sensitive: never share or log it; the browser exchanges it for a local `HttpOnly; SameSite=Strict` cookie and clears the fragment.
 
-The console is local-only (`127.0.0.1` with strict `Host`/`Origin` checks and no
-remote/LAN mode). Its Runtime view tracks multiple Herdr workspaces/spaces and
-agents using bounded polling, not event-driven Herdr subscriptions; Herdr
-outages are nonfatal and reconnect clears stale state. The dashboard reports
-all-space totals for spaces, agents, working, blocked, idle, and done, regardless
-of the selected space. Transcript output is only the selected pane's RAM-only,
-capped 16 MiB UTF-8 tail, read-only and not persistent, byte-exact, append-only,
-or an audit log. In `hod start`, Settings can install the documented three HOD
-role profiles for the selected live project and update exactly ten typed,
-allowlisted global Herdr keys after confirmation. Missing or ambiguous project
-roots fail closed; unknown and secret keys stay hidden. Runtime-only mode still
-exposes no agent-control actions.
+The console is local-only (`127.0.0.1` with strict `Host`/`Origin` checks and no remote/LAN mode). Its Runtime view tracks multiple Herdr workspaces/spaces and agents using bounded polling, not event-driven Herdr subscriptions; Herdr outages are nonfatal and reconnect clears stale state. The dashboard reports all-space totals for spaces, agents, working, blocked, idle, and done, regardless of the selected space. Transcript output is only the selected pane's RAM-only, capped 16 MiB UTF-8 tail, read-only and not persistent, byte-exact, append-only, or an audit log. In `hod start`, Settings can install the documented three HOD role profiles for the selected live project and update exactly ten typed, allowlisted global Herdr keys after confirmation. Missing or ambiguous project roots fail closed; unknown and secret keys stay hidden. Runtime-only mode still exposes no agent-control actions.
 
-The complete console behavior, settings matrix, write checks, and residual
-same-user path-swap limitation are documented in [Local HOD UI console](docs/usage-guide.md#local-hod-ui-console).
+The complete console behavior, settings matrix, write checks, and residual same-user path-swap limitation are documented in [Local HOD UI console](docs/usage-guide.md#local-hod-ui-console).
 
 ## The reminder block
 
-Models forget mid-session that Herdr orchestration is available. A project
-install writes a few lines into `CLAUDE.md` and `AGENTS.md` — the files agent
-CLIs read on every turn — so the controller is reminded to delegate rather than
-do the work itself:
+Models forget mid-session that Herdr orchestration is available. A project install writes a few lines into `CLAUDE.md` and `AGENTS.md` — the files agent CLIs read on every turn — so the controller is reminded to delegate rather than do the work itself:
 
 ```markdown
 <!-- hod:begin — managed by hod; edits inside this block are overwritten -->
@@ -383,37 +250,19 @@ do the work itself:
 <!-- hod:end -->
 ```
 
-The markers make it safe to re-run: only the block between them is replaced,
-everything you wrote outside is preserved byte-for-byte, and `hod uninstall
---project` removes it again. hod refuses to touch a file with unbalanced
-markers or one that is a symlink.
+The markers make it safe to re-run: only the block between them is replaced, everything you wrote outside is preserved byte-for-byte, and `hod uninstall --project` removes it again. hod refuses to touch a file with unbalanced markers or one that is a symlink.
 
-These files usually belong to the repository, so the block shows up in `git
-status` — **review the diff and decide whether to commit**; hod never commits.
-Skip the block entirely with `hod install --project <path> --no-memo`.
+These files usually belong to the repository, so the block shows up in `git status` — **review the diff and decide whether to commit**; hod never commits. Skip the block entirely with `hod install --project <path> --no-memo`.
 
-The block comes in two variants. The default reminds the agent to orchestrate
-when you ask for work split across agents. `--memo-strict` declares a
-**Herdr-first project**: inside a Herdr pane, every implementation, bug-fix,
-or multi-step task routes through Herdr workers, and the controller works
-directly only for questions or small edits you ask for. Outside a Herdr pane
-the preference never blocks work — the agent proceeds normally and just says
-once that the project prefers Herdr. A plain re-install keeps
-whichever variant the project already carries — teammates running `hod
-install --project` cannot accidentally downgrade it — and `--memo-default`
-switches back explicitly.
+The block comes in two variants. The default reminds the agent to orchestrate when you ask for work split across agents. `--memo-strict` declares a **Herdr-first project**: inside a Herdr pane, every implementation, bug-fix, or multi-step task routes through Herdr workers, and the controller works directly only for questions or small edits you ask for. Outside a Herdr pane the preference never blocks work — the agent proceeds normally and just says once that the project prefers Herdr. A plain re-install keeps whichever variant the project already carries — teammates running `hod install --project` cannot accidentally downgrade it — and `--memo-default` switches back explicitly.
 
-The block cannot force the skill to load: activation still requires you to name
-Herdr or the skill in your request. It reminds, it does not override.
+The block cannot force the skill to load: activation still requires you to name Herdr or the skill in your request. It reminds, it does not override.
 
 ## Role profiles: rules the harness enforces
 
-A role written in a prompt is advice. A role installed as a permission profile
-is a boundary the agent cannot cross, even if asked to:
+A role written in a prompt is advice. A role installed as a permission profile is a boundary the agent cannot cross, even if asked to:
 
-Claude enforces these profiles through settings files. Codex workers use native
-sandbox and approval flags; exact mappings and honest gaps live in [Role
-Boundaries](references/role-boundaries.md).
+Claude enforces these profiles through settings files. Codex workers use native sandbox and approval flags; exact mappings and honest gaps live in [Role Boundaries](references/role-boundaries.md).
 
 ```bash
 hod settings install          # writes .claude/settings.<role>.json + git-excludes them
@@ -425,23 +274,11 @@ hod settings install          # writes .claude/settings.<role>.json + git-exclud
 | `impl` | `acceptEdits` | `git push` `merge` `reset --hard` `tag` | Writes code freely without a prompt per file; cannot publish |
 | `reviewer` | `default` | edit tools + `Agent` + writing git commands + `rm` | Genuinely read-only, and reviews with its own eyes |
 
-Denying a whole tool is airtight — the harness removes it from the model's
-context. Denying a shell prefix is not: it matches the first token only, so
-`Bash(pytest:*)` leaves `python -m pytest` open. These profiles therefore rely
-on tool denies and leave command discipline to the task prompt and the evidence
-the controller reads back.
+Denying a whole tool is airtight — the harness removes it from the model's context. Denying a shell prefix is not: it matches the first token only, so `Bash(pytest:*)` leaves `python -m pytest` open. These profiles therefore rely on tool denies and leave command discipline to the task prompt and the evidence the controller reads back.
 
-`Agent` is the rule that keeps orchestration honest. Without it a controller
-quietly falls back to its CLI's own sub-agents: no pane appears in the sidebar,
-you cannot open or answer them, and their full transcripts land in the
-controller's context until the run dies of context exhaustion.
+`Agent` is the rule that keeps orchestration honest. Without it a controller quietly falls back to its CLI's own sub-agents: no pane appears in the sidebar, you cannot open or answer them, and their full transcripts land in the controller's context until the run dies of context exhaustion.
 
-Each profile also pins its own `defaultMode`, because a `--settings` file
-outranks your `~/.claude/settings.json`. That matters if your machine uses
-`dontAsk`: that mode auto-denies every tool absent from `permissions.allow`
-**and** denies `AskUserQuestion` even when allowed — so a worker loses `Bash`
-and can no longer report itself blocked. The pane stays silent and the
-controller waits forever. Never put `dontAsk` in a role profile.
+Each profile also pins its own `defaultMode`, because a `--settings` file outranks your `~/.claude/settings.json`. That matters if your machine uses `dontAsk`: that mode auto-denies every tool absent from `permissions.allow` **and** denies `AskUserQuestion` even when allowed — so a worker loses `Bash` and can no longer report itself blocked. The pane stays silent and the controller waits forever. Never put `dontAsk` in a role profile.
 
 ```bash
 printf '%s\n' 'Implement the requested change and return evidence.' |
@@ -457,56 +294,28 @@ printf '%s\n' 'Review the current diff read-only and return path-and-line findin
     --settings .claude/settings.reviewer.json
 ```
 
-These are fresh guarded dispatches; do not pass `--continue` or `--resume` to
-an independent reviewer.
+These are fresh guarded dispatches; do not pass `--continue` or `--resume` to an independent reviewer.
 
 Two rules proven by live testing, not theory:
 
-- **Never combine a profile with a native permission bypass flag or mode** —
-  forms such as `--dangerously-skip-permissions` or `--permission-mode
-  bypassPermissions` override deny rules. `hod dispatch start` rejects direct
-  bypass forms and values in native argv for every role before mutation. It
-  does not inspect referenced settings, profile, or config files, custom
-  sandbox profiles, or ambient CLI configuration; trust those inputs before
-  passing them.
-- **Boundary roles use a positive native-argument allowlist.** Advisor,
-  reviewer, and tester starts accept only documented model/effort and
-  read-only boundary forms. Root subcommands, native cwd/system-prompt changes,
-  inline Claude settings/tool grants, non-read-only sandbox overrides, and
-  arbitrary Codex config/profile or approval overrides fail before mutation.
-  Use file-based Claude settings, canonical Codex `-s read-only -c
-  features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules.
-- **A reviewer is never a resumed session.** Resume, fork, PR, teleport, and
-  cloud-session forms restore exactly the bias an independent review exists
-  to remove, so guarded boundary roles reject them.
+- **Never combine a profile with a native permission bypass flag or mode** — forms such as `--dangerously-skip-permissions` or `--permission-mode bypassPermissions` override deny rules. `hod dispatch start` rejects direct bypass forms and values in native argv for every role before mutation. It does not inspect referenced settings, profile, or config files, custom sandbox profiles, or ambient CLI configuration; trust those inputs before passing them.
+- **Boundary roles use a positive native-argument allowlist.** Advisor, reviewer, and tester starts accept only documented model/effort and read-only boundary forms. Root subcommands, native cwd/system-prompt changes, inline Claude settings/tool grants, non-read-only sandbox overrides, and arbitrary Codex config/profile or approval overrides fail before mutation. Use file-based Claude settings, canonical Codex `-s read-only -c features.multi_agent=false`, or Grok `--sandbox read-only` plus deny rules.
+- **A reviewer is never a resumed session.** Resume, fork, PR, teleport, and cloud-session forms restore exactly the bias an independent review exists to remove, so guarded boundary roles reject them.
 
-Profiles carry permission boundaries only — never credentials. Claude Code
-merges them over the settings it already loads, so tokens, endpoints, and
-hooks are inherited untouched. (Codex and Grok enforce roles through their own
-flags — sandbox/approval modes and allow/deny rules; see the roles table in
-[`SKILL.md`](SKILL.md).)
+Profiles carry permission boundaries only — never credentials. Claude Code merges them over the settings it already loads, so tokens, endpoints, and hooks are inherited untouched. (Codex and Grok enforce roles through their own flags — sandbox/approval modes and allow/deny rules; see the roles table in [`SKILL.md`](SKILL.md).)
 
 ## What the skill guarantees
 
 The contract the controller operates under, distilled:
 
-- **Direct-user voice** — workers believe they are talking to you; internal
-  routing never leaks into prompts.
-- **Your authority is never invented** — no fabricated approvals; scope,
-  risk, cost, and anything externally visible comes back to you. Delegation
-  is never used to obtain authority you did not grant.
-- **Fail-closed** — unknown command families, malformed JSON, ambiguous
-  targets: stop and report, never guess pane IDs or syntax.
-- **Evidence over claims** — verbal `done` is not completion; diffs, fresh
-  sentinel-guarded check output, and independent review are.
-- **One file, one writer** — parallel workers own disjoint paths; shared
-  manifests get a single integration owner; conflicts go to a named
-  integrator, never the controller's own hands.
-- **Conservative cleanup** — panes and worktrees the task created stay
-  available for your inspection until you authorize removal.
+- **Direct-user voice** — workers believe they are talking to you; internal routing never leaks into prompts.
+- **Your authority is never invented** — no fabricated approvals; scope, risk, cost, and anything externally visible comes back to you. Delegation is never used to obtain authority you did not grant.
+- **Fail-closed** — unknown command families, malformed JSON, ambiguous targets: stop and report, never guess pane IDs or syntax.
+- **Evidence over claims** — verbal `done` is not completion; diffs, fresh sentinel-guarded check output, and independent review are.
+- **One file, one writer** — parallel workers own disjoint paths; shared manifests get a single integration owner; conflicts go to a named integrator, never the controller's own hands.
+- **Conservative cleanup** — panes and worktrees the task created stay available for your inspection until you authorize removal.
 
-Every invariant lives in [`SKILL.md`](SKILL.md) itself — loaded whole whenever
-the skill activates — plus references loaded only when needed:
+Every invariant lives in [`SKILL.md`](SKILL.md) itself — loaded whole whenever the skill activates — plus references loaded only when needed:
 
 | Reference | Covers |
 | --- | --- |
@@ -517,17 +326,9 @@ the skill activates — plus references loaded only when needed:
 
 ## Scaling up
 
-- **Parallel work without collisions** — put independent tasks in separate
-  Git worktrees (`herdr worktree create`), one agent per worktree; ownership
-  stays disjoint even across checkouts.
-- **Mixed teams** — `--kind claude|codex|grok` per worker, models passed
-  through the `--` separator with exact IDs (`-m gpt-5.6-sol
-  -c model_reasoning_effort=max`, `-m grok-4.5`, `--model <id>`).
-- **Many projects, one orchestrator** — the opt-in
-  [portfolio mode](docs/portfolio-orchestration.md): one controller per
-  project workspace, a strict two-level delegation cap, and user-authored
-  policy files stored *outside* every checkout so no agent can widen its own
-  authority.
+- **Parallel work without collisions** — put independent tasks in separate Git worktrees (`herdr worktree create`), one agent per worktree; ownership stays disjoint even across checkouts.
+- **Mixed teams** — `--kind claude|codex|grok` per worker, models passed through the `--` separator with exact IDs (`-m gpt-5.6-sol -c model_reasoning_effort=max`, `-m grok-4.5`, `--model <id>`).
+- **Many projects, one orchestrator** — the opt-in [portfolio mode](docs/portfolio-orchestration.md): one controller per project workspace, a strict two-level delegation cap, and user-authored policy files stored *outside* every checkout so no agent can widen its own authority.
 
 ## Documentation
 
@@ -562,19 +363,15 @@ herdr-orchestrator/
 - Install, authenticate, or pay for agent CLIs.
 - Grant permissions you did not already provide.
 - Force every task into multi-agent mode — small tasks stay single-agent.
-- Make planning, routing, or authority decisions; those stay with the controller
-  and you.
+- Make planning, routing, or authority decisions; those stay with the controller and you.
 - Treat an agent's `done` state as proof of correctness.
 - Commit, merge, push, publish, or delete anything without your authority.
 
 ## Known limitations
 
-- Worker-role enforcement via settings profiles covers Claude Code; Codex and
-  Grok use their own native flags (documented, not templated).
-- Capability detection reads installed `--help` output — a future Herdr that
-  rewords its help fails closed (safely) until the skill is updated.
-- Herdr is pre-1.0; this project tracks current stable (tested against 0.8.0)
-  with a best-effort legacy path for 0.7.1.
+- Worker-role enforcement via settings profiles covers Claude Code; Codex and Grok use their own native flags (documented, not templated).
+- Capability detection reads installed `--help` output — a future Herdr that rewords its help fails closed (safely) until the skill is updated.
+- Herdr is pre-1.0; this project tracks current stable (tested against 0.8.0) with a best-effort legacy path for 0.7.1.
 - Native Windows is untested.
 
 ## Appendix
@@ -698,9 +495,7 @@ files, fix only the demonstrated regression, and rerun the test.
 | 🟢 | `idle` | Free and waiting | Nothing |
 | ⚪ | `unknown` | Herdr cannot classify it | Never assume success; the controller runs `herdr agent explain` |
 
-**The litmus test:** real orchestration makes **new panes appear**. If a CLI
-reports "background agents" while the sidebar stays still, it is using its own
-internal sub-agents — no Herdr involved.
+**The litmus test:** real orchestration makes **new panes appear**. If a CLI reports "background agents" while the sidebar stays still, it is using its own internal sub-agents — no Herdr involved.
 
 </details>
 
@@ -717,9 +512,7 @@ internal sub-agents — no Herdr involved.
 | Worker seems stuck | It may be blocked, not dead | Read its pane; if it is waiting on a decision, answer through the controller |
 | `hod update` refuses | The skill checkout has local edits | `cd ~/.hod/skill && git status`, then commit, stash, or discard |
 
-Start with `hod doctor` — it names the problem and the command that fixes it.
-Full guide: [Troubleshooting](docs/troubleshooting.md). Never restart the Herdr
-server to "clear" a problem; it kills work that is still running.
+Start with `hod doctor` — it names the problem and the command that fixes it. Full guide: [Troubleshooting](docs/troubleshooting.md). Never restart the Herdr server to "clear" a problem; it kills work that is still running.
 
 </details>
 
@@ -745,11 +538,7 @@ Things that are **structurally** prevented, not merely discouraged:
 
 ## Contributing
 
-Small, focused PRs welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) — in
-short: preserve the direct-user contract, back behavior claims with installed
-`--help` evidence, run `./scripts/validate.sh` and `./scripts/test-hod.sh`
-before pushing. Security reports go through
-[SECURITY.md](SECURITY.md).
+Small, focused PRs welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) — in short: preserve the direct-user contract, back behavior claims with installed `--help` evidence, run `./scripts/validate.sh` and `./scripts/test-hod.sh` before pushing. Security reports go through [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -2,15 +2,13 @@
 
 ## Introduction
 
-Add `hod start`, a foreground loopback observer for runtime Herdr state across
-all workspaces, with workspace-scoped Settings and preserved session security.
+Add `hod start`, a foreground loopback observer for runtime Herdr state across all workspaces, with workspace-scoped Settings and preserved session security.
 
 ## Requirements
 
 ### Requirement 1: Global observer runtime
 
-**Objective:** Provide a directory-independent view of live Herdr runtime state;
-Settings may target only an explicitly selected live workspace.
+**Objective:** Provide a directory-independent view of live Herdr runtime state; Settings may target only an explicitly selected live workspace.
 
 #### Acceptance Criteria
 
@@ -22,8 +20,7 @@ Settings may target only an explicitly selected live workspace.
 
 ### Requirement 2: UI, compatibility, and capability boundaries
 
-**Objective:** Preserve the established UI and session security while allowing
-bounded, confirmed Settings mutations without agent control.
+**Objective:** Preserve the established UI and session security while allowing bounded, confirmed Settings mutations without agent control.
 
 #### Acceptance Criteria
 

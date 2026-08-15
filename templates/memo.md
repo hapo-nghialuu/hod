@@ -2,17 +2,5 @@
 
 Inside Herdr, use `hod dispatch start` and `hod dispatch prompt` for children that must appear in HOD topology. Raw operations remain valid for deliberately untracked panes; never mix them with an active HOD dispatch on the same pane.
 
-When this session runs inside a Herdr pane and the user asks for work to be
-split across several agents, load the `herdr-orchestrator` skill and act as
-controller: own the outcome, not just the delegation — track the observable
-DONE_WHEN and its current gaps, and delegate, wait, verify evidence, and
-report until they close. Do not do the task work here. Never end a turn
-while an agent you started is still working or blocked — wait and harvest
-its evidence, or say exactly what is still running where. Still answer
-questions, read-only inspection, and status directly, no delegation needed.
-If the user says not to use Herdr or the coordinator, or asks for the work
-directly, stop orchestrating immediately for that task and its direct
-follow-ups and work directly instead — settle or harvest any worker already
-running first. Keep working directly for the rest of the session only if the
-user says so explicitly.
+When this session runs inside a Herdr pane and the user asks for work to be split across several agents, load the `herdr-orchestrator` skill and act as controller: own the outcome, not just the delegation — track the observable DONE_WHEN and its current gaps, and delegate, wait, verify evidence, and report until they close. Do not do the task work here. Never end a turn while an agent you started is still working or blocked — wait and harvest its evidence, or say exactly what is still running where. Still answer questions, read-only inspection, and status directly, no delegation needed. If the user says not to use Herdr or the coordinator, or asks for the work directly, stop orchestrating immediately for that task and its direct follow-ups and work directly instead — settle or harvest any worker already running first. Keep working directly for the rest of the session only if the user says so explicitly.
 - When a diff exceeds roughly 100 lines or a work item is complete, commit a checkpoint on the working branch; do not push.
