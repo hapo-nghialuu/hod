@@ -208,25 +208,376 @@ if not re.search(r"controller pane.*reused.*refresh.*before.*child", text, re.I 
 PY
 }
 
-check_hod_topology_privacy() {
-  python3 - "$repo_dir/SKILL.md" "$repo_dir/references/operations.md" <<'PY'
+run_hod_topology_privacy_check() {
+  python3 - "$@" <<'PY'
 import re
 import sys
 
 text = "\n".join(open(path, encoding="utf-8").read() for path in sys.argv[1:])
 if "[a-z0-9._-]" not in text or not re.search(r"at most 48", text, re.I):
     raise SystemExit("bounded task-label contract is missing")
-if re.search(r"hod_task[^\n]*(?:prompt|transcript|secret|credential|api[_-]?key|bearer)", text, re.I):
-    raise SystemExit("private or credential-like data appears in task binding")
+
+# Scope the privacy check to the sentence that mentions hod_task, not to a
+# physical line. Prose is normalized to one line per paragraph
+# (proseWrap:never), so a physical-newline-bounded regex silently widens
+# from "near hod_task" to "anywhere in the paragraph" and can false-positive
+# on an unrelated later clause -- e.g. the safe phrase "non-secret"
+# describing a *different* token later in the same paragraph. Sentence
+# scope keeps the assertion tied to the actual claim made about hod_task,
+# invariant to how the source happens to be wrapped. The negative lookbehind
+# treats a "non-" prefixed hit (e.g. "non-secret") as an explicit denial,
+# never a binding. Each risky word allows an optional trailing "s" so a
+# plural mention (prompts, transcripts, secrets, credentials, bearers) is
+# caught the same as its singular form, and the api-key alternative accepts
+# a hyphen, underscore, or space separator plus an optional plural (api-key,
+# api_key, api key, api-keys, api_keys, API keys). The sentence selector
+# itself also accepts an optional trailing "s" on hod_task, so a collective
+# plural mention ("child hod_tasks are ...") is screened exactly like the
+# singular token, without loosening what still counts as a match.
+flat = re.sub(r"\s+", " ", text)
+sentences = re.split(r"(?<=[.!?])\s+", flat)
+risky = re.compile(
+    r"(?<!non-)\b(?:prompts?|transcripts?|secrets?|credentials?|api[ _-]?keys?|bearers?)\b",
+    re.I,
+)
+hod_task_sentences = [s for s in sentences if re.search(r"\bhod_tasks?\b", s, re.I)]
+if not hod_task_sentences:
+    raise SystemExit("hod_task is not documented")
+for sentence in hod_task_sentences:
+    if risky.search(sentence):
+        raise SystemExit(
+            "private or credential-like data appears in task binding: "
+            + sentence.strip()
+        )
+
 if not re.search(r"hod_run[^\n]*(?:safe|identifier|run)", text, re.I):
     raise SystemExit("hod_run is not bound to the non-secret run identifier")
 PY
+}
+
+check_hod_topology_privacy() {
+  run_hod_topology_privacy_check \
+    "$repo_dir/SKILL.md" "$repo_dir/references/operations.md"
+}
+
+# Regression coverage for the sentence-scoped rewrite above: proves the
+# check is invariant to prose line wrapping (the exact bug reproduced below
+# would false-positive under the old physical-line-bounded regex once the
+# paragraph collapsed to one line) and still catches a real hod_task/secret
+# binding regardless of wrapping.
+check_hod_task_privacy_tolerates_unrelated_non_secret_clause() {
+  local fixture=$tmp_root/hod-task-privacy-safe.md
+  cat >"$fixture" <<'EOF'
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_allows_same_sentence_non_secret() {
+  local fixture=$tmp_root/hod-task-privacy-same-sentence-non-secret.md
+  cat >"$fixture" <<'EOF'
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. The `hod_task` value is a safe non-secret slug matching `[a-z0-9._-]` and is at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+# The negative lookbehind must keep denying a binding for both the singular
+# and plural spelling of a negated risky word, not just "non-secret".
+check_hod_task_privacy_allows_non_prefixed_variant() {
+  local word=$1
+  local slug
+  slug=$(printf '%s' "$word" | tr -c 'a-zA-Z0-9' '-')
+  local fixture=$tmp_root/hod-task-privacy-safe-variant-$slug.md
+  printf 'Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. The `hod_task` value is a safe non-%s slug matching `[a-z0-9._-]` and is at most 48 characters. Run IDs are safe non-secret identifiers.\n' \
+    "$word" >"$fixture"
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_catches_prompt_binding() {
+  local fixture=$tmp_root/hod-task-privacy-prompt.md
+  cat >"$fixture" <<'EOF'
+The `hod_task` value always carries the original user prompt verbatim. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_catches_secret_binding() {
+  local fixture=$tmp_root/hod-task-privacy-secret.md
+  cat >"$fixture" <<'EOF'
+The `hod_task` field stores the caller's secret access token for replay. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+# Plural "hod_tasks" collective mentions must be screened exactly like the
+# singular token: a safe collective mention still passes, and a real risky
+# binding stated against the plural form is still rejected, not silently
+# skipped because the sentence selector only looked for the singular word.
+check_hod_task_privacy_allows_plural_safe_mention() {
+  local fixture=$tmp_root/hod-task-privacy-plural-safe.md
+  cat >"$fixture" <<'EOF'
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. Every child's `hod_tasks` are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_catches_plural_binding() {
+  local fixture=$tmp_root/hod-task-privacy-plural-secret.md
+  cat >"$fixture" <<'EOF'
+Every child's `hod_tasks` carry the caller's raw secret access token for replay. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+# Full family/variant regression matrix for the risky-word alternation above.
+# Each entry binds hod_task directly to that exact word/phrase so every
+# singular and plural form -- and every api-key separator style -- is proven
+# rejected individually, not inferred from a single representative case.
+check_hod_task_privacy_catches_risky_variant() {
+  local word=$1
+  local slug
+  slug=$(printf '%s' "$word" | tr -c 'a-zA-Z0-9' '-')
+  local fixture=$tmp_root/hod-task-privacy-variant-$slug.md
+  printf 'The `hod_task` value carries the raw %s from the caller. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.\n' \
+    "$word" >"$fixture"
+  run_hod_topology_privacy_check "$fixture"
 }
 
 expect_success 'HOD topology metadata contract is documented' \
   check_hod_topology_contract
 expect_success 'HOD topology metadata keeps task labels private and bounded' \
   check_hod_topology_privacy
+expect_success 'topology privacy check tolerates an unrelated non-secret clause after reflow' \
+  check_hod_task_privacy_tolerates_unrelated_non_secret_clause
+expect_success 'topology privacy check allows non-secret in the same sentence as hod_task' \
+  check_hod_task_privacy_allows_same_sentence_non_secret
+
+hod_task_privacy_safe_negated_variants=(
+  "prompt" "prompts"
+  "transcript" "transcripts"
+  "secret" "secrets"
+  "credential" "credentials"
+  "api-key" "api-keys"
+  "api_key" "api_keys"
+  "API key" "API keys"
+  "bearer" "bearers"
+)
+for hod_task_privacy_safe_word in "${hod_task_privacy_safe_negated_variants[@]}"; do
+  expect_success \
+    "topology privacy check allows non-${hod_task_privacy_safe_word} bound to hod_task" \
+    check_hod_task_privacy_allows_non_prefixed_variant "$hod_task_privacy_safe_word"
+done
+
+expect_rejection_contains 'topology privacy check still catches hod_task bound to a prompt' \
+  'private or credential-like data appears in task binding' \
+  check_hod_task_privacy_catches_prompt_binding
+expect_rejection_contains 'topology privacy check still catches hod_task bound to a secret' \
+  'private or credential-like data appears in task binding' \
+  check_hod_task_privacy_catches_secret_binding
+expect_success 'topology privacy check allows a safe plural hod_tasks mention' \
+  check_hod_task_privacy_allows_plural_safe_mention
+expect_rejection_contains 'topology privacy check still catches a risky binding on plural hod_tasks' \
+  'private or credential-like data appears in task binding' \
+  check_hod_task_privacy_catches_plural_binding
+
+hod_task_privacy_risky_variants=(
+  "prompt" "prompts"
+  "transcript" "transcripts"
+  "secret" "secrets"
+  "credential" "credentials"
+  "api-key" "api-keys"
+  "api_key" "api_keys"
+  "API key" "API keys"
+  "bearer" "bearers"
+)
+for hod_task_privacy_risky_word in "${hod_task_privacy_risky_variants[@]}"; do
+  expect_rejection_contains \
+    "topology privacy check still catches hod_task bound to a ${hod_task_privacy_risky_word}" \
+    'private or credential-like data appears in task binding' \
+    check_hod_task_privacy_catches_risky_variant "$hod_task_privacy_risky_word"
+done
+
+# Outcome kernel: coordinator-only + outcome ownership + adaptive CONSULT
+# must not be reintroduced with contradictory wording, and none of it may be
+# described as harness-enforced (that claim belongs only to installed
+# permission profiles).
+check_outcome_kernel_contract() {
+  python3 - "$repo_dir/SKILL.md" "$repo_dir/references/coordinator-advisor.md" <<'PY'
+import re
+import sys
+
+skill_path, adaptive_path = sys.argv[1:]
+skill_raw = open(skill_path, encoding="utf-8").read()
+adaptive_raw = open(adaptive_path, encoding="utf-8").read()
+
+
+def flattened(text):
+    # Markdown source hard-wraps prose, so a literal space in a pattern must
+    # not be defeated by a line break that only exists for line length.
+    return re.sub(r"\s+", " ", text.replace("`", "")).strip()
+
+
+skill = flattened(skill_raw)
+adaptive = flattened(adaptive_raw)
+combined = skill + " " + adaptive
+
+
+def require(pattern, label, haystack=combined):
+    if not re.search(pattern, haystack, re.I):
+        raise SystemExit(f"outcome kernel contract: missing {label}")
+
+
+if "## Outcome kernel" not in skill_raw:
+    raise SystemExit("outcome kernel contract: missing Outcome kernel section in SKILL.md")
+require(r"observable DONE_WHEN", "observable DONE_WHEN framing")
+require(
+    r"Coordinator-only is the default, not a special mode",
+    "coordinator-only stated as default, not opt-in",
+)
+require(
+    r"commits? or push(?:es|ing)? an already-verified, worker-authored diff",
+    "authorized commit/push of verified worker output",
+)
+require(
+    r"is not authoring it",
+    "committing/pushing worker output is not the controller authoring it",
+)
+require(r"Explicit opt-out outranks everything above", "opt-out precedence statement")
+require(r"current task and its direct follow-ups", "opt-out default scope")
+require(
+    r"whole session only when the user says so explicitly",
+    "opt-out session-wide scope requires an explicit ask",
+)
+require(
+    r"settle or harvest it before switching to direct work",
+    "settle/harvest running worker before going direct",
+)
+require(r"CONSULT is adaptive, never a default", "CONSULT framed as adaptive, not default")
+require(
+    r"ambiguity, an architecture or design tradeoff, material risk, conflicting evidence, or a stall",
+    "CONSULT trigger enumeration",
+)
+require(
+    r"clearly-directed task skips CONSULT entirely",
+    "clear-route task skips CONSULT/advisor/reviewer ceremony",
+)
+require(
+    r"five minutes without material progress",
+    "material-progress inspection window",
+)
+require(
+    r"not a hard timeout or an automatic kill",
+    "progress signal must not become a hard timeout",
+)
+require(
+    r"artifact, a diff, a test result, a resolved decision, or an evidenced blocker",
+    "material progress definition",
+)
+require(
+    r"none of this is harness-enforced by itself",
+    "no claim that this wording is runtime/harness enforcement",
+)
+require(
+    r"a changed intent restarts the gap analysis",
+    "changed-user-intent invalidation rule",
+)
+require(
+    r"evidence, task packets, and gate verdicts tied to the superseded intent are now stale",
+    "stale evidence/packets/verdicts on changed intent",
+)
+require(
+    r"redirect each affected worker with the new constraint or settle it",
+    "redirect-or-settle affected workers on changed intent",
+)
+require(
+    r"do not re-verify without a relevant change",
+    "no-repeat-full-suite-on-unchanged-revision rule",
+)
+require(
+    r"within the current task or run.*reuse that result as long as the "
+    r"integrated revision, the relevant environment inputs, and the "
+    r"constraints it was checked against remain unchanged",
+    "staleness reuse is scoped to the current task/run and gated on "
+    "revision/environment/constraints staying unchanged",
+)
+require(
+    r"rerunning the full suite again over that same unchanged state manufactures no new evidence",
+    "reuse fresh result instead of rerunning the full suite",
+)
+require(
+    r"staleness tracks what changed, never a mechanical, time-based timeout",
+    "staleness is evidence-driven, never a mechanical clock-based timeout",
+)
+require(
+    r"bring in a tester or an independent reviewer only when risk or an actual evidence gap needs independent judgment",
+    "tester/reviewer gated on risk or an evidence gap, not by default (Outcome kernel)",
+)
+require(
+    r"bring in a tester or an independent read-only reviewer only when risk "
+    r"or an actual evidence gap needs independent judgment, not as a default "
+    r"step for every change",
+    "workflow step 7 gates the independent reviewer on risk/evidence gap, not a default for every change",
+)
+
+# Regression: two superseded wordings a prior review flagged must never
+# reappear verbatim. Both used to read as an unconditional default rather
+# than a risk/evidence-gap-gated choice: workflow step 7 mandated an
+# independent reviewer for every material change, and the opt-in section
+# implied a direct-work shortcut existed outside the explicit opt-out.
+old_wordings = {
+    "workflow step 7 unconditional independent reviewer":
+        r"fresh sentinel-guarded checks, and an independent read-only "
+        r"reviewer for material code changes",
+    "opt-in section implying an unchanged small-task/direct-user default":
+        r"the existing small-task/direct-user behavior are unchanged",
+}
+for label, pattern in old_wordings.items():
+    if re.search(pattern, combined, re.I):
+        raise SystemExit(
+            f"outcome kernel contract: superseded wording reintroduced ({label})"
+        )
+PY
+}
+
+expect_success 'outcome kernel, opt-out precedence, and adaptive CONSULT contract is documented' \
+  check_outcome_kernel_contract
+
+# Coordinator-only baseline must not carry the old ambiguous "small edit"
+# exception, and both memo variants must state the same opt-out scope:
+# current task + direct follow-ups, session-wide only on an explicit ask.
+check_memo_template_wording() {
+  python3 - "$repo_dir/templates/memo.md" "$repo_dir/templates/memo-strict.md" <<'PY'
+import re
+import sys
+
+memo_path, strict_path = sys.argv[1:]
+memo = open(memo_path, encoding="utf-8").read()
+strict = open(strict_path, encoding="utf-8").read()
+
+
+def flattened(text):
+    return re.sub(r"\s+", " ", text.replace("`", "")).strip()
+
+
+memo_flat = flattened(memo)
+strict_flat = flattened(strict)
+
+if re.search(r"small edit", strict, re.I):
+    raise SystemExit(
+        "memo-strict template: the ambiguous 'small edit' direct-work "
+        "exception must not reappear; direct task work requires an "
+        "explicit opt-out, not a size judgment call"
+    )
+for label, text in (("memo.md", memo_flat), ("memo-strict.md", strict_flat)):
+    if "direct follow-ups" not in text:
+        raise SystemExit(f"{label}: missing opt-out default scope (direct follow-ups)")
+    if "rest of the session only if the user says so explicitly" not in text:
+        raise SystemExit(f"{label}: missing session-wide opt-out gate")
+PY
+}
+
+expect_success 'memo templates keep opt-out scope consistent and drop the ambiguous small-edit exception' \
+  check_memo_template_wording
 
 run_dispatch_regressions() {
   local fake_herdr=$tmp_root/fake-herdr
@@ -1041,6 +1392,12 @@ EOF
       fork-session)
         start_args+=(-- --model "$native_model" --fork-session)
         ;;
+      none)
+        # No `--` separator at all: DISPATCH_NATIVE_ARGS/native_args stay the
+        # empty array declared by cmd_dispatch_start. Regression coverage for
+        # the Bash 3.2 nounset trap on a bare "${arr[@]}" expansion of a
+        # zero-element array.
+        ;;
       *)
         if [[ "$role" == worker ]]; then
           start_args+=(-- --model "$native_model" --native-value 'value with spaces')
@@ -1548,6 +1905,25 @@ advisor consult fable fable
 reviewer verify
 tester verify
 EOF
+
+  # Regression for the Bash 3.2 nounset trap: no `--` at all means
+  # DISPATCH_NATIVE_ARGS/native_args stay the empty array cmd_dispatch_start
+  # declares them as, which stock macOS /bin/bash 3.2 aborts on if a bare
+  # "${arr[@]}" expansion is not guarded.
+  state=$tmp_root/dispatch-start-no-native-args
+  expect_success 'dispatch start succeeds for a worker with no trailing native args' \
+    dispatch_start_with_native_mode none "$state" worker \
+    task-no-native run-no-native claude "$dispatch_cwd" right 120000 \
+    success 'no native args prompt' worker-no-native
+  expect_success 'dispatch start with no native args forwards a bare trailing --' \
+    python3 - "$state/start.argv" <<'PY'
+import sys
+start = open(sys.argv[1], "rb").read().split(b"\0")[:-1]
+assert start == [
+    b"agent", b"start", b"worker-no-native", b"--kind", b"claude",
+    b"--pane", b"child-pane", b"--timeout", b"120000", b"--",
+], start
+PY
 
   state=$tmp_root/dispatch-start-busy
   expect_success 'dispatch retries only exact agent_pane_busy once' \
@@ -2546,6 +2922,55 @@ expect_success 'memo preserves file mode' \
   python3 -c 'import os,stat,sys; sys.exit(0 if stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o644 else 1)' \
     "$mproj/CLAUDE.md"
 
+# replace_preserving_mode's stat fallback only runs when `chmod --reference`
+# fails (always true on BSD; rare but possible on GNU too, e.g. a mktemp
+# sibling on a different filesystem). Force that fallback under a GNU-capable
+# stat (one that answers --version) to prove the flavor probe picks the `-c`
+# arm and never the BSD `-f` arm, which GNU misparses into a bogus file
+# operand. The fake -f arm below deliberately returns a wrong value so this
+# test would fail if the fix ever regressed to trying it under a GNU stat.
+mode_shim_dir=$tmp_root/mode-shim/bin
+mkdir -p -- "$mode_shim_dir"
+cat >"$mode_shim_dir/chmod" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  --reference=*) exit 1 ;;
+esac
+exec /bin/chmod "$@"
+SH
+chmod +x "$mode_shim_dir/chmod"
+cat >"$mode_shim_dir/stat" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  --version)
+    printf 'fake-stat (GNUlike) 1.0\n'
+    exit 0
+    ;;
+  -c)
+    exec python3 -c \
+      'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' \
+      "$3"
+    ;;
+  -f)
+    printf 'wrong-arm-should-never-run\n'
+    exit 1
+    ;;
+esac
+exit 1
+SH
+chmod +x "$mode_shim_dir/stat"
+
+mode_shim_proj=$tmp_root/projects/memo-mode-shim
+new_memo_project "$mode_shim_proj"
+printf '# CLAUDE.md\n\nuser prose above\n' >"$mode_shim_proj/CLAUDE.md"
+chmod 644 "$mode_shim_proj/CLAUDE.md"
+
+expect_success 'project install succeeds when chmod --reference fails under a GNU-capable stat' \
+  env PATH="$mode_shim_dir:$PATH" "$hod" install --project "$mode_shim_proj"
+expect_success 'mode fallback resolves via the GNU stat arm, not the BSD misparse arm' \
+  python3 -c 'import os,stat,sys; sys.exit(0 if stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o644 else 1)' \
+    "$mode_shim_proj/CLAUDE.md"
+
 # Content the user adds after the block must survive a re-install.
 printf '\n## added later\n\nkeep me\n' >>"$mproj/CLAUDE.md"
 cp -- "$mproj/CLAUDE.md" "$tmp_root/memo-snapshot.md"
@@ -2630,6 +3055,39 @@ expect_rejection 'memo flags without --project are rejected' \
   "$hod" install --memo-strict
 expect_rejection '--no-memo conflicts with --memo-strict' \
   "$hod" install --project "$mvar" --no-memo --memo-strict
+
+# Installer-generated memo blocks must carry the outcome-focus and opt-out
+# precedence policy too, in both the default and strict variants — not only
+# the canonical skill files.
+mpolicy=$tmp_root/projects/memo-policy
+new_memo_project "$mpolicy"
+expect_success 'install writes default memo for policy checks' \
+  "$hod" install --project "$mpolicy"
+expect_success 'default memo carries outcome-focus wording' \
+  grep -qF -- 'own the outcome, not just the delegation' "$mpolicy/CLAUDE.md"
+expect_success 'default memo carries opt-out precedence wording' \
+  grep -qF -- 'not to use Herdr or the coordinator' "$mpolicy/CLAUDE.md"
+expect_success 'default memo keeps questions/read-only/status direct' \
+  grep -qF -- 'Still answer' "$mpolicy/CLAUDE.md"
+expect_success 'default memo scopes opt-out to the task and its direct follow-ups' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'direct follow-ups'"
+expect_success 'default memo gates session-wide opt-out on an explicit ask' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'the rest of the session only if the user says so explicitly'"
+
+expect_success 'install --memo-strict rewrites for policy checks' \
+  "$hod" install --project "$mpolicy" --memo-strict
+expect_success 'strict memo carries outcome-focus wording' \
+  grep -qF -- 'own the outcome, not just the delegation' "$mpolicy/CLAUDE.md"
+expect_success 'strict memo carries opt-out precedence wording' \
+  grep -qF -- 'outranks this project preference' "$mpolicy/CLAUDE.md"
+expect_success 'strict memo keeps questions/read-only/status direct' \
+  grep -qF -- 'questions, read-only inspection,' "$mpolicy/CLAUDE.md"
+expect_success 'strict memo scopes opt-out to the task and its direct follow-ups' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'direct follow-ups'"
+expect_success 'strict memo gates session-wide opt-out on an explicit ask' \
+  bash -c "tr '\n' ' ' <'$mpolicy/CLAUDE.md' | grep -qF -- 'the rest of the session only if the user says so explicitly'"
+expect_rejection 'strict memo drops the ambiguous small-edit exception' \
+  grep -qF -- 'small edit' "$mpolicy/CLAUDE.md"
 
 # ---------------------------------------------------------------------------
 # E0-style snapshot: all four Git change domains, paths, content, and staleness
@@ -2819,7 +3277,7 @@ expect_success 'E0 snapshot becomes stale after a later content change' \
 # ---------------------------------------------------------------------------
 expect_success 'help exits 0' "$hod" help
 expect_success 'version exits 0' "$hod" version
-expect_output_contains 'version reports 0.1.17' 'hod 0.1.17' "$hod" version
+expect_output_contains 'version reports 0.1.18' 'hod 0.1.18' "$hod" version
 expect_success 'no-args prints usage' "$hod"
 
 # ---------------------------------------------------------------------------
@@ -3488,14 +3946,23 @@ log_lacks_token() {
 
 rm -rf -- "$hod_home/run"
 expect_success 'start returns without blocking (bounded 5s)' \
-  run_bounded 5 run_bg start --no-open
+  run_bounded 5 run_bg start
 expect_success 'start writes a pid file' \
   test -f "$bg_pid_file"
 
 read -r bg_pid _ <"$bg_pid_file"
 expect_success 'start --background pid is a real live process' \
   kill -0 "$bg_pid"
-run_dir_mode=$(stat -f '%Lp' "$hod_home/run" 2>/dev/null || stat -c '%a' "$hod_home/run" 2>/dev/null)
+# GNU stat's -f is a boolean filesystem-status flag, not "use this format" —
+# trying it the same way as BSD's -f misparses the format string as a file
+# operand, and the failed attempt's stray stdout can leak into $run_dir_mode
+# before the fallback runs. Detect the flavor with --version first so only
+# the matching invocation ever executes.
+if stat --version >/dev/null 2>&1; then
+  run_dir_mode=$(stat -c '%a' "$hod_home/run" 2>/dev/null || true)
+else
+  run_dir_mode=$(stat -f '%Lp' "$hod_home/run" 2>/dev/null || true)
+fi
 expect_success 'start creates run/ with mode 700' \
   test "$run_dir_mode" = 700
 expect_success 'start log never contains the raw one-time token' \
@@ -3505,7 +3972,7 @@ expect_success 'start log keeps a redacted marker in place of the fragment' \
 
 first_bg_pid=$bg_pid
 expect_output_contains 'a second start reports already running' \
-  'already running' run_bg start --background --no-open
+  'already running' run_bg start --background
 read -r bg_pid _ <"$bg_pid_file"
 expect_success 'a second start does not spawn a duplicate process' \
   test "$bg_pid" = "$first_bg_pid"

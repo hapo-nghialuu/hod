@@ -14,9 +14,7 @@ No memory, repository instructions, or source outside these three draft paths wa
 
 ### 2026-08-12 user-approved scope expansion
 
-The user subsequently approved Settings inside the global UI and explicitly
-accepted selecting a project/space before configuration. Source-grounded
-inspection found these reusable boundaries:
+The user subsequently approved Settings inside the global UI and explicitly accepted selecting a project/space before configuration. Source-grounded inspection found these reusable boundaries:
 
 | Source | Evidence | Decision |
 |---|---|---|
@@ -26,25 +24,18 @@ inspection found these reusable boundaries:
 | `ui/server/global-settings.mjs` | Fresh `session.snapshot`, opaque workspace ID, deterministic target precedence, canonicalization, path redaction, and fail-closed ambiguity | Use as the isolation boundary between browser selection and filesystem I/O. |
 | `ui/server/global-observer-api-controller.mjs` | Settings capability enabled, agent control disabled, path-like fields rejected | Preserve split capabilities: Settings mutation is not agent control. |
 
-No external research was needed: the expansion composes existing local
-settings services and Herdr runtime metadata; it adds no third-party API or
-standard.
+No external research was needed: the expansion composes existing local settings services and Herdr runtime metadata; it adds no third-party API or standard.
 
 ## Selected Decisions
 
-- Keep runtime observation and transcript display read-only; add a separate,
-  explicitly selected Settings lane rather than treating the launch directory
-  as a project.
+- Keep runtime observation and transcript display read-only; add a separate, explicitly selected Settings lane rather than treating the launch directory as a project.
 - Derive all displayed data from live Herdr runtime snapshots and retain the one-request-per-connection protocol.
-- Express Settings and agent-control permissions as independent capabilities:
-  `settings=true`, `mutation=true`, `control=false`.
+- Express Settings and agent-control permissions as independent capabilities: `settings=true`, `mutation=true`, `control=false`.
 - Keep legacy UI entrypoints and the existing terminal presentation unchanged.
 
 ## Rejected Alternatives
 
-- Launch-directory or browser-path project discovery: rejected because it
-  violates directory independence and permits target injection. Server-side
-  resolution from a fresh selected workspace snapshot is accepted.
+- Launch-directory or browser-path project discovery: rejected because it violates directory independence and permits target injection. Server-side resolution from a fresh selected workspace snapshot is accepted.
 - Daemon or LAN service: rejected because lifecycle ownership and network exposure are out of scope.
 - Event subscription or agent commands: rejected because they conflict with the Herdr 0.8 snapshot contract or observer-only behavior.
 

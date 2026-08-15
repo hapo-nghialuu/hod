@@ -195,9 +195,20 @@ require_patterns(
     adaptive_skill_mode,
     {
         "explicit activation": r"Activate adaptive routing only when the user explicitly asks",
-        "unchanged default": r"Without that opt-in, the workflow above and the existing small-task/direct-user behavior are unchanged",
+        "kernel and base workflow stay active without opt-in": r"The Outcome kernel above and the base Workflow above stay active either way",
+        "opt-in scoped to adaptive checkpoint artifacts only": r"this opt-in controls only whether the adaptive checkpoint artifacts below",
+        "no shortcut around the explicit opt-out": r"never a separate default path around the explicit opt-out",
     },
 )
+if re.search(
+    r"the existing small-task/direct-user behavior are unchanged",
+    adaptive_skill_mode,
+    re.IGNORECASE,
+):
+    raise SystemExit(
+        "Adaptive opt-in boundary: superseded 'small-task/direct-user' wording "
+        "must not reappear; the explicit opt-out is the only direct path for task work"
+    )
 if not re.search(
     r"DIRECT \+ CONSULT \| ASK_USER\s+->\s+no plan",
     base_modes,
@@ -667,7 +678,7 @@ for pattern in (r"\bHold\b", r"\bpublishing\b", r"\bask me\b", r"not.*advisor.*a
             f"Adaptive usage guide: ASK_USER example missing semantic {pattern}"
         )
 
-expected_version = "0.1.17"
+expected_version = "0.1.18"
 version_surfaces = {
     "bin/hod": (
         (root / "bin/hod").read_text(encoding="utf-8"),

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-HOD_VERSION=0.1.17
+HOD_VERSION=0.1.18
 HOD_REPO_URL="${HOD_REPO_URL:-https://github.com/hapo-nghialuu/hod.git}"
 
 usage() {
@@ -384,14 +384,23 @@ install_project_adapters_absolute() {
 # Replace a file through a temporary sibling, keeping the original mode. mktemp
 # creates 0600, which would silently tighten a repository file's permissions.
 # GNU chmod has --reference; BSD does not, and its stat spells the mode
-# differently, so validate whatever the fallback produces before trusting it.
-# BSD chmod also rejects `--`, so no end-of-options marker here.
+# differently. GNU stat's -f is a boolean filesystem-status flag, not "use
+# this format" — trying it the same way as BSD's -f misparses the format
+# string as a file operand, and a failed attempt's stray stdout can still
+# leak into $mode before the fallback runs. Detect the flavor with --version
+# first so only the matching invocation ever executes, then validate whatever
+# it produces before trusting it. BSD chmod also rejects `--`, so no
+# end-of-options marker here.
 replace_preserving_mode() {
   local tmp=$1 file=$2
   local mode
 
   if [[ -f "$file" ]] && ! chmod "--reference=$file" "$tmp" 2>/dev/null; then
-    mode=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null || true)
+    if stat --version >/dev/null 2>&1; then
+      mode=$(stat -c '%a' "$file" 2>/dev/null || true)
+    else
+      mode=$(stat -f '%Lp' "$file" 2>/dev/null || true)
+    fi
     if [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then
       chmod "$mode" "$tmp"
     fi
@@ -1065,7 +1074,14 @@ cmd_start() {
     esac
   done
 
-  start_background "${passthrough[@]}"
+  # Bash 3.2's nounset aborts on a bare "${arr[@]}" expansion of a zero-element
+  # array (stock macOS /bin/bash) — guard the empty case instead of expanding
+  # it directly, so a passthrough-less `hod start` keeps working there too.
+  if (( ${#passthrough[@]} )); then
+    start_background "${passthrough[@]}"
+  else
+    start_background
+  fi
 }
 
 # Print "already running" and return 0 when $pid_file names a live process
@@ -3188,16 +3204,22 @@ dispatch_require_child_settled() {
 
 dispatch_validate_native_model() {
   local model=$1 count=0 expect_value=0 value
-  for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
-    if (( expect_value )); then
-      [[ "$value" == "$model" ]] || \
-        usage_error "advisor native model must exactly match --advisor-choice: $model"
-      count=$((count + 1))
-      expect_value=0
-    elif [[ "$value" == -m || "$value" == --model ]]; then
-      expect_value=1
-    fi
-  done
+  # Bash 3.2 nounset aborts on a bare "${DISPATCH_NATIVE_ARGS[@]}" expansion
+  # when the array has zero elements (advisor start with no trailing native
+  # args); skip the loop entirely instead so count stays 0 and the usage_error
+  # below reports the missing model normally.
+  if (( ${#DISPATCH_NATIVE_ARGS[@]} )); then
+    for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
+      if (( expect_value )); then
+        [[ "$value" == "$model" ]] || \
+          usage_error "advisor native model must exactly match --advisor-choice: $model"
+        count=$((count + 1))
+        expect_value=0
+      elif [[ "$value" == -m || "$value" == --model ]]; then
+        expect_value=1
+      fi
+    done
+  fi
   (( expect_value == 0 )) || usage_error "advisor model flag requires a value"
   (( count == 1 )) || usage_error "advisor start requires exactly one matching -m or --model native argument"
 }
@@ -3346,6 +3368,14 @@ dispatch_validate_boundary_role_args() {
 
 dispatch_validate_fresh_role_args() {
   local role=$1 kind=$2 value previous=''
+  # Bash 3.2 nounset aborts on a bare "${DISPATCH_NATIVE_ARGS[@]}" expansion
+  # when the array has zero elements (dispatch start with no trailing native
+  # args); nothing to scan in that case, so skip straight to the boundary
+  # check instead of expanding the empty array.
+  if (( ${#DISPATCH_NATIVE_ARGS[@]} == 0 )); then
+    dispatch_validate_boundary_role_args "$role" "$kind"
+    return 0
+  fi
   for value in "${DISPATCH_NATIVE_ARGS[@]}"; do
     if [[ "$kind" == claude && "$previous" == --settings && "$value" == *\\* ]]; then
       usage_error "$role dispatch forbids escaped inline native settings"
@@ -3460,7 +3490,14 @@ cmd_dispatch_start() {
   dispatch_validate_timeout "$timeout"
   [[ "$agent_name" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || \
     usage_error "agent name must be a bounded safe name"
-  DISPATCH_NATIVE_ARGS=("${native_args[@]}")
+  # Same Bash 3.2 nounset trap as cmd_start: guard the zero-element case
+  # instead of expanding "${native_args[@]}" directly when `--` was never
+  # given (no trailing native args is a valid dispatch start invocation).
+  if (( ${#native_args[@]} )); then
+    DISPATCH_NATIVE_ARGS=("${native_args[@]}")
+  else
+    DISPATCH_NATIVE_ARGS=()
+  fi
   dispatch_validate_advisor_selection "$role" "$advisor_choice" "$advisor_model" "$kind"
   dispatch_validate_fresh_role_args "$role" "$kind"
 
@@ -3500,8 +3537,16 @@ cmd_dispatch_start() {
   dispatch_require_bound_unstarted_child "$controller_workspace" "$DISPATCH_CWD" \
     "$child_revision"
   DISPATCH_AGENT_START_ATTEMPTED=true
-  dispatch_agent_start "$agent_name" "$kind" "$child" "$timeout" \
-    "$controller_workspace" "$DISPATCH_NEW_CHILD_TERMINAL" "${native_args[@]}"
+  # Same Bash 3.2 nounset trap as cmd_start: guard the zero-element case
+  # instead of expanding "${native_args[@]}" directly when `--` was never
+  # given, while preserving exact forwarding/order when native args exist.
+  if (( ${#native_args[@]} )); then
+    dispatch_agent_start "$agent_name" "$kind" "$child" "$timeout" \
+      "$controller_workspace" "$DISPATCH_NEW_CHILD_TERMINAL" "${native_args[@]}"
+  else
+    dispatch_agent_start "$agent_name" "$kind" "$child" "$timeout" \
+      "$controller_workspace" "$DISPATCH_NEW_CHILD_TERMINAL"
+  fi
   launch_seq=$DISPATCH_AGENT_SEQ
   dispatch_wait_agent_ready "$agent_name" "$agent_name" "$child" "$kind" \
     "$controller_workspace" "$timeout" "$DISPATCH_AGENT_TERMINAL" \

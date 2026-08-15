@@ -2,9 +2,7 @@
 
 **Requirement:** R1.1-R1.4 and R2.2 — global observer runtime boundary
 **Status:** done
-**Supersession:** This task and its evidence record the original Settings-denied
-baseline. The user-approved R2-01 task supersedes only that capability boundary;
-the launcher, polling, transcript, network, and agent-control constraints remain.
+**Supersession:** This task and its evidence record the original Settings-denied baseline. The user-approved R2-01 task supersedes only that capability boundary; the launcher, polling, transcript, network, and agent-control constraints remain.
 **Priority:** P0
 **Estimated Effort:** 1–2 implementation days
 **Dependencies:** none
@@ -12,102 +10,68 @@ the launcher, polling, transcript, network, and agent-control constraints remain
 
 ## Context
 
-- **Repository fact:** the production path is `bin/hod` Bash plus a
-  zero-dependency Node.js 20 `.mjs` UI; there is no TypeScript command tree.
-- **Why:** `hod start` must work from any directory while remaining a
-  foreground, read-only, loopback-only observer.
-- **Target outcome:** the real chain is
-  `hod start -> bin/hod -> ui/server.mjs --runtime-only -> ui/server/global-observer-runtime.mjs`.
+- **Repository fact:** the production path is `bin/hod` Bash plus a zero-dependency Node.js 20 `.mjs` UI; there is no TypeScript command tree.
+- **Why:** `hod start` must work from any directory while remaining a foreground, read-only, loopback-only observer.
+- **Target outcome:** the real chain is `hod start -> bin/hod -> ui/server.mjs --runtime-only -> ui/server/global-observer-runtime.mjs`.
 
 ## Constraints
 
-- **MUST:** Public `hod start` accepts `--port` and `--no-open`, rejects
-  `--project`, and leaves `hod ui` plus `hod ui --project` unchanged.
-- **MUST:** Use the internal `--runtime-only` server selector and compose the
-  existing `RuntimeEvents` and `RuntimeClientConnections` one-shot machinery.
-  Do not create another snapshot client.
-- **MUST:** Reuse the existing loopback HTTP server, `SessionAuth`, static
-  serving, and Host/Origin request policy.
-- **MUST:** Runtime-only state includes capabilities settings=false,
-  control=false, and mutation=false. Settings endpoints return HTTP 404
-  `ERR_ROUTE` without settings I/O; selected transcript is read-only.
-- **MUST NOT:** Resolve/read/write project or config paths, call
-  `events.subscribe` at bootstrap, create a daemon PID, bind LAN, control
-  agents, or control the Herdr lifecycle.
-- **MUST NOT:** Modify `ui/server/application-paths.mjs`,
-  `ui/server/live-console-runtime.mjs`, `ui/server/api-controller.mjs`, or
-  `ui/server/runtime-events.mjs` unless later implementation evidence requires
-  a separately recorded scope correction.
-- **SCOPE:** Modify/create only the paths listed in Related Files. Leave global
-  frontend aggregation to R1-01.
+- **MUST:** Public `hod start` accepts `--port` and `--no-open`, rejects `--project`, and leaves `hod ui` plus `hod ui --project` unchanged.
+- **MUST:** Use the internal `--runtime-only` server selector and compose the existing `RuntimeEvents` and `RuntimeClientConnections` one-shot machinery. Do not create another snapshot client.
+- **MUST:** Reuse the existing loopback HTTP server, `SessionAuth`, static serving, and Host/Origin request policy.
+- **MUST:** Runtime-only state includes capabilities settings=false, control=false, and mutation=false. Settings endpoints return HTTP 404 `ERR_ROUTE` without settings I/O; selected transcript is read-only.
+- **MUST NOT:** Resolve/read/write project or config paths, call `events.subscribe` at bootstrap, create a daemon PID, bind LAN, control agents, or control the Herdr lifecycle.
+- **MUST NOT:** Modify `ui/server/application-paths.mjs`, `ui/server/live-console-runtime.mjs`, `ui/server/api-controller.mjs`, or `ui/server/runtime-events.mjs` unless later implementation evidence requires a separately recorded scope correction.
+- **SCOPE:** Modify/create only the paths listed in Related Files. Leave global frontend aggregation to R1-01.
 
 ## Steps
 
 1. Add the real `hod start` dispatch in `bin/hod`.
-   - Forward `--port` and `--no-open` and append the internal
-     `--runtime-only` selector when invoking `ui/server.mjs`.
-   - Reject `--project` and unknown/duplicate options with the established
-     usage path.
+   - Forward `--port` and `--no-open` and append the internal `--runtime-only` selector when invoking `ui/server.mjs`.
+   - Reject `--project` and unknown/duplicate options with the established usage path.
    - Preserve exact `hod ui` argv forwarding and behavior.
    - _Requirements: 1.1, 2.1_
 
 2. Extend `ui/server/runtime-options.mjs` with a runtime-only mode.
    - Keep the existing project parser for `hod ui`.
-   - In runtime-only mode accept only `--runtime-only`, `--port`, `--no-open`,
-     and the existing internal launcher value as applicable.
+   - In runtime-only mode accept only `--runtime-only`, `--port`, `--no-open`, and the existing internal launcher value as applicable.
    - Reject `--project` in runtime-only mode and return a stable usage error.
    - _Requirements: 1.1, 2.1_
 
 3. Select the runtime-only composition in `ui/server.mjs`.
-   - Route `--runtime-only` to `global-observer-runtime.mjs` and its API
-     controller without calling project/config resolution or `LiveConsoleRuntime`.
-   - Keep the existing loopback/session/Host/Origin HTTP server and browser
-     launch lifecycle.
+   - Route `--runtime-only` to `global-observer-runtime.mjs` and its API controller without calling project/config resolution or `LiveConsoleRuntime`.
+   - Keep the existing loopback/session/Host/Origin HTTP server and browser launch lifecycle.
    - Keep Herdr startup failure nonfatal and the process foreground.
    - _Requirements: 1.1, 1.2, 1.3, 2.3_
 
 4. Create `ui/server/global-observer-runtime.mjs`.
-   - Compose/inject `RuntimeEvents`; rely on its existing
-     `RuntimeClientConnections` for fresh one-request snapshot polling.
-   - Expose runtime state and explicit observer capabilities without a second
-     socket/snapshot client or event subscription.
-   - Keep transcript selection display-only and stop/close all owned runtime
-     resources cleanly.
+   - Compose/inject `RuntimeEvents`; rely on its existing `RuntimeClientConnections` for fresh one-request snapshot polling.
+   - Expose runtime state and explicit observer capabilities without a second socket/snapshot client or event subscription.
+   - Keep transcript selection display-only and stop/close all owned runtime resources cleanly.
    - _Requirements: 1.3, 1.4, 2.5_
 
 5. Create `ui/server/global-observer-api-controller.mjs`.
    - Serve runtime state and read-only transcript selection.
-   - Return `{ status: 404, body: { error: { code: 'ERR_ROUTE' } } }` for
-     observer settings routes, without constructing, reading, or writing a
-     settings controller.
+   - Return `{ status: 404, body: { error: { code: 'ERR_ROUTE' } } }` for observer settings routes, without constructing, reading, or writing a settings controller.
    - Expose `capabilities: { settings: false, control: false, mutation: false }`.
    - _Requirements: 1.5, 2.2, 2.5_
 
 6. Update the owned R0 tests and Bash harness.
    - Prove public option forwarding/rejection and legacy `hod ui` compatibility.
-   - Prove runtime mode bypasses project/config access and uses the production
-     entrypoint.
-   - Prove one fresh client/connection and one `session.snapshot` request per
-     refresh, with no `events.subscribe`.
-   - Prove settings routes are 404 `ERR_ROUTE` with no settings I/O and the
-     selected transcript response is sanitized/read-only.
+   - Prove runtime mode bypasses project/config access and uses the production entrypoint.
+   - Prove one fresh client/connection and one `session.snapshot` request per refresh, with no `events.subscribe`.
+   - Prove settings routes are 404 `ERR_ROUTE` with no settings I/O and the selected transcript response is sanitized/read-only.
    - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3_
 
 ## Requirements
 
-- 1.1 — `hod start` runs from any current working directory, accepts only its
-  public runtime options, and rejects `--project`.
-- 1.2 — The observer is foreground and loopback-only with no daemon, LAN,
-  lifecycle, or agent-control behavior.
-- 1.3 — Runtime-only operation performs no project/config path resolution or
-  reads/writes and uses runtime state only.
-- 1.4 — Herdr 0.8 refreshes use one request per fresh connection with no
-  bootstrap subscription.
+- 1.1 — `hod start` runs from any current working directory, accepts only its public runtime options, and rejects `--project`.
+- 1.2 — The observer is foreground and loopback-only with no daemon, LAN, lifecycle, or agent-control behavior.
+- 1.3 — Runtime-only operation performs no project/config path resolution or reads/writes and uses runtime state only.
+- 1.4 — Herdr 0.8 refreshes use one request per fresh connection with no bootstrap subscription.
 - 2.1 — `hod ui` and `hod ui --project` remain backward compatible.
-- 2.2 — Settings UI/API capability is disabled; settings routes return 404
-  `ERR_ROUTE` without settings I/O.
-- 2.3 — The existing loopback/session/Host/Origin security boundary remains in
-  use.
+- 2.2 — Settings UI/API capability is disabled; settings routes return 404 `ERR_ROUTE` without settings I/O.
+- 2.3 — The existing loopback/session/Host/Origin security boundary remains in use.
 - 2.5 — Observer state and transcript selection expose no mutation/control.
 
 ## Related Files
@@ -128,20 +92,13 @@ the launcher, polling, transcript, network, and agent-control constraints remain
 
 ## Completion Criteria
 
-- [x] `hod start --port <port> --no-open` reaches the real runtime-only server
-  from unrelated working directories.
-- [x] `hod start --project <path>` is rejected; `hod ui` and
-  `hod ui --project` retain their current argv and behavior.
-- [x] Public `hod ui --runtime-only` rejects with usage exit 2 while the
-  private `hod start` launcher still appends the internal selector.
-- [x] The process is foreground and loopback-only, with no project/config I/O,
-  LAN, daemon, lifecycle, or agent-control path.
-- [x] Runtime polling reuses `RuntimeEvents` and `RuntimeClientConnections`;
-  each refresh has exactly one fresh connection and one snapshot request.
-- [x] Settings routes return 404 `ERR_ROUTE` without settings I/O, and state
-  advertises settings/control/mutation as false.
-- [x] Selected transcript output is read-only and the existing Host/Origin
-  checks are still enforced by the shared HTTP server.
+- [x] `hod start --port <port> --no-open` reaches the real runtime-only server from unrelated working directories.
+- [x] `hod start --project <path>` is rejected; `hod ui` and `hod ui --project` retain their current argv and behavior.
+- [x] Public `hod ui --runtime-only` rejects with usage exit 2 while the private `hod start` launcher still appends the internal selector.
+- [x] The process is foreground and loopback-only, with no project/config I/O, LAN, daemon, lifecycle, or agent-control path.
+- [x] Runtime polling reuses `RuntimeEvents` and `RuntimeClientConnections`; each refresh has exactly one fresh connection and one snapshot request.
+- [x] Settings routes return 404 `ERR_ROUTE` without settings I/O, and state advertises settings/control/mutation as false.
+- [x] Selected transcript output is read-only and the existing Host/Origin checks are still enforced by the shared HTTP server.
 
 ## Evidence
 
@@ -228,10 +185,7 @@ Verification: PASS — 2026-08-12 02:12 +07:00; R0 evidence synchronized to the 
   bcbff04f3f5835d6e127c8eaae893507ebc93ac195dd85132fac80050a2b80ea  ui/server/global-observer-api-controller.mjs
   ```
 
-  The API controller is a pre-existing, unmodified R0 dependency; that note is
-  intentionally outside the hash field. The task file is intentionally excluded
-  from the hash list because it contains this receipt. Recompute every listed
-  hash, HEAD, and status/path set with:
+  The API controller is a pre-existing, unmodified R0 dependency; that note is intentionally outside the hash field. The task file is intentionally excluded from the hash list because it contains this receipt. Recompute every listed hash, HEAD, and status/path set with:
 
   ```sh
   node --input-type=module -e "import { readFileSync } from 'node:fs'; import { createHash } from 'node:crypto'; const paths = ['bin/hod','scripts/test-hod.sh','ui/server.mjs','ui/server/runtime-options.mjs','ui/server/global-observer-runtime.mjs','ui/test/runtime-options.test.mjs','ui/test/server-entrypoint.test.mjs','ui/test/global-observer-runtime.test.mjs','ui/test/global-observer-api-controller.test.mjs','specs/hod-global-observer/spec.json','ui/server/global-observer-api-controller.mjs']; for (const path of paths) console.log(createHash('sha256').update(readFileSync(path)).digest('hex') + '  ' + path);"
