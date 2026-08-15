@@ -208,25 +208,194 @@ if not re.search(r"controller pane.*reused.*refresh.*before.*child", text, re.I 
 PY
 }
 
-check_hod_topology_privacy() {
-  python3 - "$repo_dir/SKILL.md" "$repo_dir/references/operations.md" <<'PY'
+run_hod_topology_privacy_check() {
+  python3 - "$@" <<'PY'
 import re
 import sys
 
 text = "\n".join(open(path, encoding="utf-8").read() for path in sys.argv[1:])
 if "[a-z0-9._-]" not in text or not re.search(r"at most 48", text, re.I):
     raise SystemExit("bounded task-label contract is missing")
-if re.search(r"hod_task[^\n]*(?:prompt|transcript|secret|credential|api[_-]?key|bearer)", text, re.I):
-    raise SystemExit("private or credential-like data appears in task binding")
+
+# Scope the privacy check to the sentence that mentions hod_task, not to a
+# physical line. Prose is normalized to one line per paragraph
+# (proseWrap:never), so a physical-newline-bounded regex silently widens
+# from "near hod_task" to "anywhere in the paragraph" and can false-positive
+# on an unrelated later clause -- e.g. the safe phrase "non-secret"
+# describing a *different* token later in the same paragraph. Sentence
+# scope keeps the assertion tied to the actual claim made about hod_task,
+# invariant to how the source happens to be wrapped. The negative lookbehind
+# treats a "non-" prefixed hit (e.g. "non-secret") as an explicit denial,
+# never a binding. Each risky word allows an optional trailing "s" so a
+# plural mention (prompts, transcripts, secrets, credentials, bearers) is
+# caught the same as its singular form, and the api-key alternative accepts
+# a hyphen, underscore, or space separator plus an optional plural (api-key,
+# api_key, api key, api-keys, api_keys, API keys). The sentence selector
+# itself also accepts an optional trailing "s" on hod_task, so a collective
+# plural mention ("child hod_tasks are ...") is screened exactly like the
+# singular token, without loosening what still counts as a match.
+flat = re.sub(r"\s+", " ", text)
+sentences = re.split(r"(?<=[.!?])\s+", flat)
+risky = re.compile(
+    r"(?<!non-)\b(?:prompts?|transcripts?|secrets?|credentials?|api[ _-]?keys?|bearers?)\b",
+    re.I,
+)
+hod_task_sentences = [s for s in sentences if re.search(r"\bhod_tasks?\b", s, re.I)]
+if not hod_task_sentences:
+    raise SystemExit("hod_task is not documented")
+for sentence in hod_task_sentences:
+    if risky.search(sentence):
+        raise SystemExit(
+            "private or credential-like data appears in task binding: "
+            + sentence.strip()
+        )
+
 if not re.search(r"hod_run[^\n]*(?:safe|identifier|run)", text, re.I):
     raise SystemExit("hod_run is not bound to the non-secret run identifier")
 PY
+}
+
+check_hod_topology_privacy() {
+  run_hod_topology_privacy_check \
+    "$repo_dir/SKILL.md" "$repo_dir/references/operations.md"
+}
+
+# Regression coverage for the sentence-scoped rewrite above: proves the
+# check is invariant to prose line wrapping (the exact bug reproduced below
+# would false-positive under the old physical-line-bounded regex once the
+# paragraph collapsed to one line) and still catches a real hod_task/secret
+# binding regardless of wrapping.
+check_hod_task_privacy_tolerates_unrelated_non_secret_clause() {
+  local fixture=$tmp_root/hod-task-privacy-safe.md
+  cat >"$fixture" <<'EOF'
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_allows_same_sentence_non_secret() {
+  local fixture=$tmp_root/hod-task-privacy-same-sentence-non-secret.md
+  cat >"$fixture" <<'EOF'
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. The `hod_task` value is a safe non-secret slug matching `[a-z0-9._-]` and is at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+# The negative lookbehind must keep denying a binding for both the singular
+# and plural spelling of a negated risky word, not just "non-secret".
+check_hod_task_privacy_allows_non_prefixed_variant() {
+  local word=$1
+  local slug
+  slug=$(printf '%s' "$word" | tr -c 'a-zA-Z0-9' '-')
+  local fixture=$tmp_root/hod-task-privacy-safe-variant-$slug.md
+  printf 'Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. The `hod_task` value is a safe non-%s slug matching `[a-z0-9._-]` and is at most 48 characters. Run IDs are safe non-secret identifiers.\n' \
+    "$word" >"$fixture"
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_catches_prompt_binding() {
+  local fixture=$tmp_root/hod-task-privacy-prompt.md
+  cat >"$fixture" <<'EOF'
+The `hod_task` value always carries the original user prompt verbatim. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_catches_secret_binding() {
+  local fixture=$tmp_root/hod-task-privacy-secret.md
+  cat >"$fixture" <<'EOF'
+The `hod_task` field stores the caller's secret access token for replay. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+# Plural "hod_tasks" collective mentions must be screened exactly like the
+# singular token: a safe collective mention still passes, and a real risky
+# binding stated against the plural form is still rejected, not silently
+# skipped because the sentence selector only looked for the singular word.
+check_hod_task_privacy_allows_plural_safe_mention() {
+  local fixture=$tmp_root/hod-task-privacy-plural-safe.md
+  cat >"$fixture" <<'EOF'
+Only these token names are allowed: `hod_role`, `hod_parent`, `hod_relation`, `hod_task`, and `hod_run`. Every child's `hod_tasks` are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+check_hod_task_privacy_catches_plural_binding() {
+  local fixture=$tmp_root/hod-task-privacy-plural-secret.md
+  cat >"$fixture" <<'EOF'
+Every child's `hod_tasks` carry the caller's raw secret access token for replay. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.
+EOF
+  run_hod_topology_privacy_check "$fixture"
+}
+
+# Full family/variant regression matrix for the risky-word alternation above.
+# Each entry binds hod_task directly to that exact word/phrase so every
+# singular and plural form -- and every api-key separator style -- is proven
+# rejected individually, not inferred from a single representative case.
+check_hod_task_privacy_catches_risky_variant() {
+  local word=$1
+  local slug
+  slug=$(printf '%s' "$word" | tr -c 'a-zA-Z0-9' '-')
+  local fixture=$tmp_root/hod-task-privacy-variant-$slug.md
+  printf 'The `hod_task` value carries the raw %s from the caller. Task labels are safe slugs matching `[a-z0-9._-]` and are at most 48 characters. Run IDs are safe non-secret identifiers.\n' \
+    "$word" >"$fixture"
+  run_hod_topology_privacy_check "$fixture"
 }
 
 expect_success 'HOD topology metadata contract is documented' \
   check_hod_topology_contract
 expect_success 'HOD topology metadata keeps task labels private and bounded' \
   check_hod_topology_privacy
+expect_success 'topology privacy check tolerates an unrelated non-secret clause after reflow' \
+  check_hod_task_privacy_tolerates_unrelated_non_secret_clause
+expect_success 'topology privacy check allows non-secret in the same sentence as hod_task' \
+  check_hod_task_privacy_allows_same_sentence_non_secret
+
+hod_task_privacy_safe_negated_variants=(
+  "prompt" "prompts"
+  "transcript" "transcripts"
+  "secret" "secrets"
+  "credential" "credentials"
+  "api-key" "api-keys"
+  "api_key" "api_keys"
+  "API key" "API keys"
+  "bearer" "bearers"
+)
+for hod_task_privacy_safe_word in "${hod_task_privacy_safe_negated_variants[@]}"; do
+  expect_success \
+    "topology privacy check allows non-${hod_task_privacy_safe_word} bound to hod_task" \
+    check_hod_task_privacy_allows_non_prefixed_variant "$hod_task_privacy_safe_word"
+done
+
+expect_rejection_contains 'topology privacy check still catches hod_task bound to a prompt' \
+  'private or credential-like data appears in task binding' \
+  check_hod_task_privacy_catches_prompt_binding
+expect_rejection_contains 'topology privacy check still catches hod_task bound to a secret' \
+  'private or credential-like data appears in task binding' \
+  check_hod_task_privacy_catches_secret_binding
+expect_success 'topology privacy check allows a safe plural hod_tasks mention' \
+  check_hod_task_privacy_allows_plural_safe_mention
+expect_rejection_contains 'topology privacy check still catches a risky binding on plural hod_tasks' \
+  'private or credential-like data appears in task binding' \
+  check_hod_task_privacy_catches_plural_binding
+
+hod_task_privacy_risky_variants=(
+  "prompt" "prompts"
+  "transcript" "transcripts"
+  "secret" "secrets"
+  "credential" "credentials"
+  "api-key" "api-keys"
+  "api_key" "api_keys"
+  "API key" "API keys"
+  "bearer" "bearers"
+)
+for hod_task_privacy_risky_word in "${hod_task_privacy_risky_variants[@]}"; do
+  expect_rejection_contains \
+    "topology privacy check still catches hod_task bound to a ${hod_task_privacy_risky_word}" \
+    'private or credential-like data appears in task binding' \
+    check_hod_task_privacy_catches_risky_variant "$hod_task_privacy_risky_word"
+done
 
 # Outcome kernel: coordinator-only + outcome ownership + adaptive CONSULT
 # must not be reintroduced with contradictory wording, and none of it may be
